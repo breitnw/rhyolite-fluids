@@ -2,16 +2,23 @@
 
 use vulkano;
 
+use vulkano::buffer::{CpuAccessibleBuffer, BufferUsage, TypedBufferAccess, CpuBufferPool, BufferContents};
 use vulkano::command_buffer::allocator::{StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo};
 use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SubpassContents, RenderPassBeginInfo};
+use vulkano::descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet};
+use vulkano::descriptor_set::allocator::{DescriptorSetAllocator, StandardDescriptorSetAllocator};
 use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType};
 use vulkano::device::{Device, DeviceExtensions, DeviceCreateInfo, QueueCreateInfo, Queue};
 use vulkano::image::view::ImageView;
 use vulkano::image::{ImageAccess, SwapchainImage};
 use vulkano::instance::{Instance, InstanceCreateInfo};
 use vulkano::library::VulkanLibrary;
-use vulkano::pipeline::graphics::viewport::Viewport;
-use vulkano::render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass};
+use vulkano::memory::allocator::{GenericMemoryAllocator, FreeListAllocator};
+use vulkano::pipeline::{GraphicsPipeline, Pipeline, PipelineBindPoint};
+use vulkano::pipeline::graphics::input_assembly::InputAssemblyState;
+use vulkano::pipeline::graphics::vertex_input::BuffersDefinition;
+use vulkano::pipeline::graphics::viewport::{Viewport, ViewportState};
+use vulkano::render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass};
 use vulkano::swapchain::{
     self, AcquireError, Surface, Swapchain, SwapchainCreateInfo, SwapchainCreationError, SwapchainPresentInfo,
 };
@@ -28,6 +35,7 @@ use winit::window::{Window, WindowBuilder};
 use std::sync::Arc;
 
 mod geometry;
+use geometry::{Vertex, MVP, vs};
 
 // TODO: implement frames in flight if not implemented in the tutorial
 
@@ -55,7 +63,7 @@ struct Renderer {
     framebuffers: Vec<Arc<Framebuffer>>,
     command_buffer_allocator: StandardCommandBufferAllocator,
     queue: Arc<Queue>,
-
+    pipeline: Arc<GraphicsPipeline>,
 }
 
 impl Renderer {
@@ -161,6 +169,19 @@ impl Renderer {
         )
         .unwrap();
 
+        let vs = geometry::vs::load(device.clone()).expect("failed to create vertex shader module");
+        let fs = geometry::fs::load(device.clone()).expect("failed to create fragment shader module");
+
+        let pipeline = GraphicsPipeline::start()
+            .vertex_input_state(BuffersDefinition::new().vertex::<Vertex>())
+            .vertex_shader(vs.entry_point("main").unwrap(), ())
+            .input_assembly_state(InputAssemblyState::new())
+            .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
+            .fragment_shader(fs.entry_point("main").unwrap(), ())
+            .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
+            .build(device.clone())
+            .unwrap();
+
         let mut viewport = Viewport {
             origin: [0.0, 0.0],
             dimensions: [0.0, 0.0],
@@ -184,13 +205,39 @@ impl Renderer {
             framebuffers,
             command_buffer_allocator,
             queue,
+            pipeline,
         }
     }
 
     pub fn run(mut self) {
+        // A generic FreeListAllocator used to allocate the vertex buffer. 
+        let generic_allocator = Arc::from(
+            GenericMemoryAllocator::<Arc<FreeListAllocator>>::new_default(self.device.clone())
+        );
+        
+        let vertex_buffer = CpuAccessibleBuffer::from_iter(
+            &generic_allocator,
+            BufferUsage {
+                vertex_buffer: true,
+                ..Default::default()
+            }, 
+            false, 
+            [
+                Vertex::new([-0.5, 0.5, 0.0], [1.0, 0.0, 0.0]),
+                Vertex::new([0.5, 0.5, 0.0], [0.0, 1.0, 0.0]),
+                Vertex::new([0.0, -0.5, 0.0], [0.0, 0.0, 1.0]),
+            ].into_iter()
+        ).unwrap();
+
+        let uniform_buffer = CpuBufferPool::<vs::ty::MVP_Data>::uniform_buffer(generic_allocator.clone());
+        let descriptor_set_allocator = StandardDescriptorSetAllocator::new(self.device.clone());
+
+
         // Running the code
         let mut recreate_swapchain = false;
         let mut previous_frame_end = Some(Box::new(sync::now(self.device.clone())) as Box<dyn GpuFuture>);
+
+        let mut t: f32 = 0.;
 
         // TODO: "For more fully-featured applications you’ll want to decouple program logic (for instance, simulating 
         // a game’s economy) from rendering operations."
@@ -210,6 +257,26 @@ impl Renderer {
                 },
                 Event::RedrawEventsCleared => {
                     previous_frame_end.as_mut().take().unwrap().cleanup_finished();
+
+                    t += 1./60.;
+
+                    let uniform_buffer_subbuffer = {
+                        let dimensions: [u32; 2] = self.window.inner_size().into();
+                        let mvp = MVP::perspective(dimensions[0] as f32 / dimensions[1] as f32, t);
+                        let uniform_data = vs::ty::MVP_Data {
+                            model: mvp.model.into(),
+                            view: mvp.view.into(),
+                            projection: mvp.projection.into(),
+                        };
+                        uniform_buffer.from_data(uniform_data).unwrap()
+                    };
+
+                    let layout = self.pipeline.layout().set_layouts().get(0).unwrap();
+                    let set = PersistentDescriptorSet::new(
+                        &descriptor_set_allocator,
+                        layout.clone(),
+                        [WriteDescriptorSet::buffer(0, uniform_buffer_subbuffer)],
+                    ).unwrap();
 
                     // Recreate the swapchain if it was invalidated, such as by a window resize
                     if recreate_swapchain {
@@ -262,6 +329,17 @@ impl Renderer {
                             },
                             SubpassContents::Inline,
                         )
+                        .unwrap()
+                        .set_viewport(0, [self.viewport.clone()])
+                        .bind_pipeline_graphics(self.pipeline.clone())
+                        .bind_descriptor_sets(
+                            PipelineBindPoint::Graphics, 
+                            self.pipeline.layout().clone(), 
+                            0,
+                            set.clone()
+                        )
+                        .bind_vertex_buffers(0, vertex_buffer.clone())
+                        .draw(vertex_buffer.len() as u32, 1, 0, 0)
                         .unwrap()
                         .end_render_pass()
                         .unwrap();
