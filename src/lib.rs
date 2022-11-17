@@ -2,29 +2,30 @@
 
 use vulkano;
 
-use vulkano::buffer::{CpuAccessibleBuffer, BufferUsage, TypedBufferAccess, CpuBufferPool, BufferContents};
+use vulkano::buffer::{CpuAccessibleBuffer, BufferUsage, TypedBufferAccess, CpuBufferPool};
 use vulkano::command_buffer::allocator::{StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo};
 use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SubpassContents, RenderPassBeginInfo};
 use vulkano::descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet};
-use vulkano::descriptor_set::allocator::{DescriptorSetAllocator, StandardDescriptorSetAllocator};
-use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType};
+use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
 use vulkano::device::{Device, DeviceExtensions, DeviceCreateInfo, QueueCreateInfo, Queue};
 use vulkano::image::view::ImageView;
-use vulkano::image::{ImageAccess, SwapchainImage};
+use vulkano::image::AttachmentImage;
 use vulkano::instance::{Instance, InstanceCreateInfo};
 use vulkano::library::VulkanLibrary;
 use vulkano::memory::allocator::{GenericMemoryAllocator, FreeListAllocator};
+use vulkano::pipeline::graphics::rasterization::{RasterizationState, CullMode};
 use vulkano::pipeline::{GraphicsPipeline, Pipeline, PipelineBindPoint};
 use vulkano::pipeline::graphics::input_assembly::InputAssemblyState;
 use vulkano::pipeline::graphics::vertex_input::BuffersDefinition;
 use vulkano::pipeline::graphics::viewport::{Viewport, ViewportState};
-use vulkano::render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass};
+use vulkano::pipeline::graphics::depth_stencil::DepthStencilState;
+use vulkano::render_pass::{Framebuffer,  RenderPass, Subpass};
 use vulkano::swapchain::{
-    self, AcquireError, Surface, Swapchain, SwapchainCreateInfo, SwapchainCreationError, SwapchainPresentInfo,
+    self, AcquireError, Swapchain, SwapchainCreateInfo, SwapchainCreationError, SwapchainPresentInfo,
 };
 use vulkano::sync::{self, FlushError, GpuFuture};
 use vulkano::Version;
-use vulkano::format::ClearValue;
+use vulkano::format::{ClearValue, Format};
 
 use vulkano_win::VkSurfaceBuild;
 
@@ -33,9 +34,16 @@ use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::{Window, WindowBuilder};
 
 use std::sync::Arc;
+use std::time::Instant;
 
 mod geometry;
-use geometry::{Vertex, MVP, vs};
+use geometry::{Vertex, MVP};
+
+mod lighting;
+use lighting::{AmbientLight, DirectionalLight};
+
+mod shaders;
+mod vk_setup;
 
 // TODO: implement frames in flight if not implemented in the tutorial
 
@@ -60,10 +68,17 @@ struct Renderer {
     window: Arc<Window>,
     render_pass: Arc<RenderPass>,
     viewport: Viewport,
+
     framebuffers: Vec<Arc<Framebuffer>>,
+    color_buffer: Arc<ImageView<AttachmentImage>>,
+    normal_buffer: Arc<ImageView<AttachmentImage>>,
+
     command_buffer_allocator: StandardCommandBufferAllocator,
+    generic_allocator: Arc<GenericMemoryAllocator<Arc<FreeListAllocator>>>,
     queue: Arc<Queue>,
-    pipeline: Arc<GraphicsPipeline>,
+
+    deferred_pipeline: Arc<GraphicsPipeline>,
+    lighting_pipeline: Arc<GraphicsPipeline>,
 }
 
 impl Renderer {
@@ -102,7 +117,7 @@ impl Renderer {
 
         // Get the physical device using these features
         let (physical_device, queue_family_index) =
-            Renderer::select_physical_device(&instance, &surface, &device_ext);
+            vk_setup::select_physical_device(&instance, &surface, &device_ext);
 
         // Create a device, which is the software representation of the hardware stored in the physical device
         let (device, mut queues) = Device::new(
@@ -152,43 +167,94 @@ impl Renderer {
 
         // Declare the render pass, a structure that lets us define how the rendering process should work. Tells the hardware
         // where it can expect to find input and where it can store output
-        let render_pass = vulkano::single_pass_renderpass!(
+        let render_pass = vulkano::ordered_passes_renderpass!(
             device.clone(),
             attachments: {
-                color: {
+                final_color: {
                     load: Clear,
                     store: Store,
                     format: swapchain.image_format(),
                     samples: 1,
+                },
+                color: {
+                    load: Clear,
+                    store: Store,
+                    format: Format::A2B10G10R10_UNORM_PACK32,
+                    samples: 1,
+                },
+                normals: {
+                    load: Clear,
+                    store: DontCare,
+                    format: Format::R16G16B16A16_SFLOAT,
+                    samples: 1,
+                },
+                depth: {
+                    load: Clear,
+                    store: DontCare,
+                    format: Format::D16_UNORM,
+                    samples: 1,
                 }
             },
-            pass: {
-                color: [color],
-                depth_stencil: {}
-            }
+            passes: [
+                {
+                    color: [color, normals],
+                    depth_stencil: {depth},
+                    input: []
+                },
+                {
+                    color: [final_color],
+                    depth_stencil: {},
+                    input: [color, normals]
+                }
+            ]
         )
         .unwrap();
 
-        let vs = geometry::vs::load(device.clone()).expect("failed to create vertex shader module");
-        let fs = geometry::fs::load(device.clone()).expect("failed to create fragment shader module");
+        let deferred_pass = Subpass::from(render_pass.clone(), 0).unwrap();
+        let lighting_pass = Subpass::from(render_pass.clone(), 1).unwrap();
 
-        let pipeline = GraphicsPipeline::start()
+        let deferred_vert = shaders::deferred_vert::load(device.clone()).unwrap();
+        let deferred_frag = shaders::deferred_frag::load(device.clone()).unwrap();
+        let lighting_vert = shaders::lighting_vert::load(device.clone()).unwrap();
+        let lighting_frag = shaders::lighting_frag::load(device.clone()).unwrap();
+
+        let deferred_pipeline = GraphicsPipeline::start()
             .vertex_input_state(BuffersDefinition::new().vertex::<Vertex>())
-            .vertex_shader(vs.entry_point("main").unwrap(), ())
+            .vertex_shader(deferred_vert.entry_point("main").unwrap(), ())
             .input_assembly_state(InputAssemblyState::new())
             .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
-            .fragment_shader(fs.entry_point("main").unwrap(), ())
-            .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
+            .fragment_shader(deferred_frag.entry_point("main").unwrap(), ())
+            .depth_stencil_state(DepthStencilState::simple_depth_test())
+            .rasterization_state(RasterizationState::new().cull_mode(CullMode::Back))
+            .render_pass(deferred_pass)
             .build(device.clone())
             .unwrap();
 
+        let lighting_pipeline = GraphicsPipeline::start()
+            .vertex_input_state(BuffersDefinition::new().vertex::<Vertex>())
+            .vertex_shader(lighting_vert.entry_point("main").unwrap(), ())
+            .input_assembly_state(InputAssemblyState::new())
+            .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
+            .fragment_shader(lighting_frag.entry_point("main").unwrap(), ())
+            .rasterization_state(RasterizationState::new().cull_mode(CullMode::Back))
+            .render_pass(lighting_pass)
+            .build(device.clone())
+            .unwrap();
+        
         let mut viewport = Viewport {
             origin: [0.0, 0.0],
             dimensions: [0.0, 0.0],
             depth_range: 0.0..1.0,
         };
 
-        let framebuffers = Renderer::window_size_dependent_setup(&images, render_pass.clone(), &mut viewport);
+        // A generic FreeListAllocator used to allocate the vertex buffer and other data
+        // TODO: might want to have multiple allocators separated based on function
+        let generic_allocator = Arc::from(
+            GenericMemoryAllocator::<Arc<FreeListAllocator>>::new_default(device.clone())
+        );
+
+        let (framebuffers, color_buffer, normal_buffer) = 
+            vk_setup::window_size_dependent_setup(&generic_allocator, &images, render_pass.clone(), &mut viewport);
 
         let command_buffer_allocator = StandardCommandBufferAllocator::new(
             device.clone(), 
@@ -202,42 +268,102 @@ impl Renderer {
             window,
             render_pass,
             viewport,
+
             framebuffers,
+            color_buffer,
+            normal_buffer,
+
             command_buffer_allocator,
+            generic_allocator,
             queue,
-            pipeline,
+
+            deferred_pipeline,
+            lighting_pipeline,
+
         }
     }
 
     pub fn run(mut self) {
-        // A generic FreeListAllocator used to allocate the vertex buffer. 
-        let generic_allocator = Arc::from(
-            GenericMemoryAllocator::<Arc<FreeListAllocator>>::new_default(self.device.clone())
-        );
-        
-        let vertex_buffer = CpuAccessibleBuffer::from_iter(
-            &generic_allocator,
+        let vertex_buf = CpuAccessibleBuffer::from_iter(
+            &self.generic_allocator,
             BufferUsage {
                 vertex_buffer: true,
                 ..Default::default()
             }, 
             false, 
             [
-                Vertex::new([-0.5, 0.5, 0.0], [1.0, 0.0, 0.0]),
-                Vertex::new([0.5, 0.5, 0.0], [0.0, 1.0, 0.0]),
-                Vertex::new([0.0, -0.5, 0.0], [0.0, 0.0, 1.0]),
+                // front face
+                Vertex { position: [-1.000000, -1.000000, 1.000000], normal: [0.0000, 0.0000, 1.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [-1.000000, 1.000000, 1.000000], normal: [0.0000, 0.0000, 1.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [1.000000, 1.000000, 1.000000], normal: [0.0000, 0.0000, 1.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [-1.000000, -1.000000, 1.000000], normal: [0.0000, 0.0000, 1.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [1.000000, 1.000000, 1.000000], normal: [0.0000, 0.0000, 1.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [1.000000, -1.000000, 1.000000], normal: [0.0000, 0.0000, 1.0000], color: [1.0, 0.35, 0.137]},
+
+                // back face
+                Vertex { position: [1.000000, -1.000000, -1.000000], normal: [0.0000, 0.0000, -1.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [1.000000, 1.000000, -1.000000], normal: [0.0000, 0.0000, -1.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [-1.000000, 1.000000, -1.000000], normal: [0.0000, 0.0000, -1.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [1.000000, -1.000000, -1.000000], normal: [0.0000, 0.0000, -1.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [-1.000000, 1.000000, -1.000000], normal: [0.0000, 0.0000, -1.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [-1.000000, -1.000000, -1.000000], normal: [0.0000, 0.0000, -1.0000], color: [1.0, 0.35, 0.137]},
+
+                // top face
+                Vertex { position: [-1.000000, -1.000000, 1.000000], normal: [0.0000, -1.0000, 0.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [1.000000, -1.000000, 1.000000], normal: [0.0000, -1.0000, 0.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [1.000000, -1.000000, -1.000000], normal: [0.0000, -1.0000, 0.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [-1.000000, -1.000000, 1.000000], normal: [0.0000, -1.0000, 0.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [1.000000, -1.000000, -1.000000], normal: [0.0000, -1.0000, 0.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [-1.000000, -1.000000, -1.000000], normal: [0.0000, -1.0000, 0.0000], color: [1.0, 0.35, 0.137]},
+
+                // bottom face
+                Vertex { position: [1.000000, 1.000000, 1.000000], normal: [0.0000, 1.0000, 0.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [-1.000000, 1.000000, 1.000000], normal: [0.0000, 1.0000, 0.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [-1.000000, 1.000000, -1.000000], normal: [0.0000, 1.0000, 0.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [1.000000, 1.000000, 1.000000], normal: [0.0000, 1.0000, 0.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [-1.000000, 1.000000, -1.000000], normal: [0.0000, 1.0000, 0.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [1.000000, 1.000000, -1.000000], normal: [0.0000, 1.0000, 0.0000], color: [1.0, 0.35, 0.137]},
+
+                // left face
+                Vertex { position: [-1.000000, -1.000000, -1.000000], normal: [-1.0000, 0.0000, 0.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [-1.000000, 1.000000, -1.000000], normal: [-1.0000, 0.0000, 0.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [-1.000000, 1.000000, 1.000000], normal: [-1.0000, 0.0000, 0.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [-1.000000, -1.000000, -1.000000], normal: [-1.0000, 0.0000, 0.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [-1.000000, 1.000000, 1.000000], normal: [-1.0000, 0.0000, 0.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [-1.000000, -1.000000, 1.000000], normal: [-1.0000, 0.0000, 0.0000], color: [1.0, 0.35, 0.137]},
+
+                // right face
+                Vertex { position: [1.000000, -1.000000, 1.000000], normal: [1.0000, 0.0000, 0.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [1.000000, 1.000000, 1.000000], normal: [1.0000, 0.0000, 0.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [1.000000, 1.000000, -1.000000], normal: [1.0000, 0.0000, 0.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [1.000000, -1.000000, 1.000000], normal: [1.0000, 0.0000, 0.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [1.000000, 1.000000, -1.000000], normal: [1.0000, 0.0000, 0.0000], color: [1.0, 0.35, 0.137]},
+                Vertex { position: [1.000000, -1.000000, -1.000000], normal: [1.0000, 0.0000, 0.0000], color: [1.0, 0.35, 0.137]},
             ].into_iter()
         ).unwrap();
 
-        let uniform_buffer = CpuBufferPool::<vs::ty::MVP_Data>::uniform_buffer(generic_allocator.clone());
+        let uniform_buf = CpuBufferPool::<shaders::deferred_vert::ty::MVP_Data>::uniform_buffer(self.generic_allocator.clone());
+        let ambient_light_buf = CpuBufferPool::<shaders::lighting_frag::ty::Ambient_Light_Data>::uniform_buffer(self.generic_allocator.clone());
+        let directional_light_buf = CpuBufferPool::<shaders::lighting_frag::ty::Directional_Light_Data>::uniform_buffer(self.generic_allocator.clone());
+
+        // TODO: use a descriptor pool instead of a descriptor set allocator
         let descriptor_set_allocator = StandardDescriptorSetAllocator::new(self.device.clone());
 
-
+        // Lighting
+        let ambient_light = AmbientLight {
+            color: [1.0, 1.0, 1.0],
+            intensity: 0.2
+        };
+        let directional_light = DirectionalLight {
+            position: [-4.0, -4.0, 0.0, 1.0], 
+            color: [1.0, 1.0, 1.0]
+        };
+        
         // Running the code
         let mut recreate_swapchain = false;
         let mut previous_frame_end = Some(Box::new(sync::now(self.device.clone())) as Box<dyn GpuFuture>);
 
-        let mut t: f32 = 0.;
+        let rotation_start = Instant::now();
 
         // TODO: "For more fully-featured applications you’ll want to decouple program logic (for instance, simulating 
         // a game’s economy) from rendering operations."
@@ -258,25 +384,68 @@ impl Renderer {
                 Event::RedrawEventsCleared => {
                     previous_frame_end.as_mut().take().unwrap().cleanup_finished();
 
-                    t += 1./60.;
-
-                    let uniform_buffer_subbuffer = {
+                    let uniform_subbuffer = {
+                        let elapsed = rotation_start.elapsed().as_secs_f32();
                         let dimensions: [u32; 2] = self.window.inner_size().into();
-                        let mvp = MVP::perspective(dimensions[0] as f32 / dimensions[1] as f32, t);
-                        let uniform_data = vs::ty::MVP_Data {
+                        let mvp = MVP::perspective(dimensions[0] as f32 / dimensions[1] as f32, elapsed);
+                        let uniform_data = shaders::deferred_vert::ty::MVP_Data {
                             model: mvp.model.into(),
                             view: mvp.view.into(),
                             projection: mvp.projection.into(),
                         };
-                        uniform_buffer.from_data(uniform_data).unwrap()
+                        uniform_buf.from_data(uniform_data).unwrap()
                     };
 
-                    let layout = self.pipeline.layout().set_layouts().get(0).unwrap();
-                    let set = PersistentDescriptorSet::new(
+                    let ambient_subbuffer = {
+                        let uniform_data = shaders::lighting_frag::ty::Ambient_Light_Data {
+                            color: ambient_light.color.into(),
+                            intensity: ambient_light.intensity.into()
+                        };
+                        ambient_light_buf.from_data(uniform_data).unwrap()
+                    };
+
+                    let directional_subbuffer = {
+                        let uniform_data = shaders::lighting_frag::ty::Directional_Light_Data {
+                            color: directional_light.color.into(),
+                            position: directional_light.position.into()
+                        };
+                        directional_light_buf.from_data(uniform_data).unwrap()
+                    };
+
+                    let deferred_layout = self.deferred_pipeline
+                        .layout()
+                        .set_layouts()
+                        .get(0)
+                        .unwrap();
+                    // TODO: use a different descriptor set because PersistentDescriptorSet is expected to be long-lived
+                    let deferred_set = PersistentDescriptorSet::new(
                         &descriptor_set_allocator,
-                        layout.clone(),
-                        [WriteDescriptorSet::buffer(0, uniform_buffer_subbuffer)],
+                        deferred_layout.clone(),
+                        [
+                            WriteDescriptorSet::buffer(0, uniform_subbuffer.clone()),
+                            // WriteDescriptorSet::buffer(1, ambient_subbuffer),
+                            // WriteDescriptorSet::buffer(2, directional_subbuffer),
+                        ],
                     ).unwrap();
+
+                    let lighting_layout = self.lighting_pipeline
+                        .layout()
+                        .set_layouts()
+                        .get(0)
+                        .unwrap();
+                    // TODO: use a different descriptor set because PersistentDescriptorSet is expected to be long-lived
+                    let lighting_set = PersistentDescriptorSet::new(
+                        &descriptor_set_allocator,
+                        lighting_layout.clone(),
+                        [
+                            WriteDescriptorSet::image_view(0, self.color_buffer.clone()),
+                            WriteDescriptorSet::image_view(1, self.normal_buffer.clone()),
+                            WriteDescriptorSet::buffer(2, uniform_subbuffer.clone()),
+                            WriteDescriptorSet::buffer(3, ambient_subbuffer),
+                            WriteDescriptorSet::buffer(4, directional_subbuffer)
+                        ],
+                    ).unwrap();
+
 
                     // Recreate the swapchain if it was invalidated, such as by a window resize
                     if recreate_swapchain {
@@ -290,7 +459,9 @@ impl Renderer {
                         };
 
                         self.swapchain = new_swapchain;
-                        self.framebuffers = Renderer::window_size_dependent_setup(&new_images, self.render_pass.clone(), &mut self.viewport);
+                        // TODO: use a different allocator?
+                        (self.framebuffers, self.color_buffer, self.normal_buffer) = 
+                            vk_setup::window_size_dependent_setup(&self.generic_allocator, &new_images, self.render_pass.clone(), &mut self.viewport);
                         recreate_swapchain = false;
                     }
 
@@ -311,6 +482,9 @@ impl Renderer {
                     // Set the clear color
                     let clear_values: Vec<Option<ClearValue>> = vec![
                         Some(ClearValue::Float([0.5, 0.0, 1.0, 1.0])),
+                        Some(ClearValue::Float([0.0, 0.0, 0.0, 1.0])),
+                        Some(ClearValue::Float([0.0, 0.0, 0.0, 1.0])),
+                        Some(ClearValue::Depth(1f32)),
                     ];
 
                     // Create a command buffer, which holds a list of commands that rell the graphics hardware what to do
@@ -331,15 +505,26 @@ impl Renderer {
                         )
                         .unwrap()
                         .set_viewport(0, [self.viewport.clone()])
-                        .bind_pipeline_graphics(self.pipeline.clone())
+                        .bind_pipeline_graphics(self.deferred_pipeline.clone())
                         .bind_descriptor_sets(
                             PipelineBindPoint::Graphics, 
-                            self.pipeline.layout().clone(), 
+                            self.deferred_pipeline.layout().clone(), 
                             0,
-                            set.clone()
+                            deferred_set.clone()
                         )
-                        .bind_vertex_buffers(0, vertex_buffer.clone())
-                        .draw(vertex_buffer.len() as u32, 1, 0, 0)
+                        .bind_vertex_buffers(0, vertex_buf.clone())
+                        .draw(vertex_buf.len() as u32, 1, 0, 0)
+                        .unwrap()
+                        .next_subpass(SubpassContents::Inline)
+                        .unwrap()
+                        .bind_pipeline_graphics(self.lighting_pipeline.clone())
+                        .bind_descriptor_sets(
+                            PipelineBindPoint::Graphics, 
+                            self.lighting_pipeline.layout().clone(), 
+                            0, 
+                            lighting_set.clone()
+                        )
+                        .draw(vertex_buf.len() as u32, 1, 0, 0)
                         .unwrap()
                         .end_render_pass()
                         .unwrap();
@@ -382,61 +567,5 @@ impl Renderer {
                 _ => {}
             }
         });
-    }
-
-    /// Selects the best physical device based on the available hardware
-    fn select_physical_device(
-        instance: &Arc<Instance>,
-        surface: &Arc<Surface>,
-        device_extensions: &DeviceExtensions,
-    ) -> (Arc<PhysicalDevice>, u32) {
-        let (physical_device, queue_family) = instance
-            .enumerate_physical_devices()
-            .unwrap()
-            .filter(|p| p.supported_extensions().contains(device_extensions))
-            .filter_map(|p| {
-                p.queue_family_properties()
-                    .iter()
-                    .enumerate()
-                    .find(|&q| {
-                        q.1.queue_flags.graphics
-                            && p.surface_support(q.0 as u32, surface).unwrap_or(false)
-                    })
-                    .map(|q| (p.clone(), q.0))
-            })
-            .min_by_key(|(p, _)| match p.properties().device_type {
-                PhysicalDeviceType::DiscreteGpu => 0,
-                PhysicalDeviceType::IntegratedGpu => 1,
-                PhysicalDeviceType::VirtualGpu => 2,
-                PhysicalDeviceType::Cpu => 3,
-                PhysicalDeviceType::Other => 4,
-                _ => 5,
-            })
-            .unwrap();
-        (physical_device, queue_family as u32)
-    }
-
-    /// Sets up the framebuffers based on the size of the viewport
-    fn window_size_dependent_setup(
-        images: &[Arc<SwapchainImage>],
-        render_pass: Arc<RenderPass>,
-        viewport: &mut Viewport,
-    ) -> Vec<Arc<Framebuffer>> {
-        let dimensions = images[0].dimensions().width_height();
-        viewport.dimensions = [dimensions[0] as f32, dimensions[1] as f32];
-        images
-            .iter()
-            .map(|image| {
-                let view = ImageView::new_default(image.clone()).unwrap();
-                Framebuffer::new(
-                    render_pass.clone(),
-                    FramebufferCreateInfo {
-                        attachments: vec![view],
-                        ..Default::default()
-                    }
-                )
-                .unwrap()
-            })
-            .collect()
     }
 }

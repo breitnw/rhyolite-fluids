@@ -1,42 +1,15 @@
 use bytemuck::{Zeroable, Pod};
-use nalgebra_glm::{TMat4, identity, perspective, look_at, vec3, translate, rotate, rotate_y};
+use nalgebra_glm::{TMat4, identity, perspective, look_at, vec3, translate, rotate_y, rotate_x, rotate_z};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
 pub struct Vertex {
-    position: [f32; 3],
-    color: [f32; 3],
-}
-impl Vertex {
-    pub fn new(position: [f32; 3], color: [f32; 3]) -> Self {
-        Self {
-            position,
-            color,
-        }
-    }
-}
-vulkano::impl_vertex!(Vertex, position, color);
-
-
-// Vertex shader
-pub mod vs {
-    vulkano_shaders::shader!{
-        ty: "vertex",
-        path: "src/shaders/shader.vs",
-        types_meta: {
-            use bytemuck::{Pod, Zeroable};
-            #[derive(Clone, Copy, Zeroable, Pod)]
-        },
-    }
+    pub position: [f32; 3],
+    pub normal: [f32; 3],
+    pub color: [f32; 3],
 }
 
-// Fragment shader
-pub mod fs {
-    vulkano_shaders::shader!{
-        ty: "fragment",
-        path: "src/shaders/shader.fs",
-    }
-}
+vulkano::impl_vertex!(Vertex, position, normal, color);
 
 #[derive(Debug, Clone)]
 pub(crate) struct MVP {
@@ -55,11 +28,15 @@ impl MVP {
     }
 
     pub fn perspective(aspect_ratio: f32, t: f32) -> MVP {
+        let mut model = translate(&identity(), &vec3(0.0, t.sin(), -5.0));
+        model = rotate_y(&model, t);
+        model = rotate_x(&model, t / 2.);
+        model = rotate_z(&model, t / 3.);
+
         MVP { 
-            model: rotate_y(&translate(&identity(), &vec3(0.0, t.sin() / 3., -2.0)), t), 
+            model,
             view: look_at(&vec3(0.0, 0.0, 0.0), &vec3(0.0, 0.0, -0.01), &vec3(0.0, 1.0, 0.0)), 
-            projection: perspective(aspect_ratio, 1.2, 0.0, 100.0)
+            projection: perspective(aspect_ratio, 1.2, 0.02, 100.0)
         }
     }
 }
-
