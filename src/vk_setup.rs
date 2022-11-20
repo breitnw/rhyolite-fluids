@@ -1,9 +1,5 @@
 use vulkano;
 
-use vulkano::buffer::{CpuAccessibleBuffer, TypedBufferAccess};
-use vulkano::command_buffer::allocator::{CommandBufferAllocator};
-use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SubpassContents, RenderPassBeginInfo, PrimaryCommandBufferAbstract};
-use vulkano::descriptor_set::PersistentDescriptorSet;
 use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType};
 use vulkano::device::{Device, DeviceExtensions, DeviceCreateInfo, QueueCreateInfo, Queue};
 use vulkano::image::view::ImageView;
@@ -11,17 +7,14 @@ use vulkano::image::{ImageAccess, SwapchainImage, AttachmentImage};
 use vulkano::instance::{Instance, InstanceCreateInfo};
 use vulkano::library::VulkanLibrary;
 use vulkano::memory::allocator::MemoryAllocator;
-use vulkano::pipeline::{GraphicsPipeline, Pipeline, PipelineBindPoint};
 use vulkano::pipeline::graphics::viewport::Viewport;
 use vulkano::render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass};
 use vulkano::swapchain::{Surface, Swapchain, SwapchainCreateInfo};
 use vulkano::Version;
-use vulkano::format::{ClearValue, Format};
+use vulkano::format::{Format};
 use winit::window::Window;
 
 use std::sync::Arc;
-
-use crate::geometry::Vertex;
 
 /// Selects the best physical device based on the available hardware
 pub fn select_physical_device(
@@ -225,64 +218,4 @@ pub fn get_render_pass(device: &Arc<Device>, final_format: Format) -> Arc<Render
         ]
     )
     .unwrap()
-}
-
-pub struct GraphicsInfo<'a> {
-    pub vertex_buf: &'a Arc<CpuAccessibleBuffer<[Vertex]>>,
-    pub deferred_pipeline: &'a Arc<GraphicsPipeline>,
-    pub lighting_pipeline: &'a Arc<GraphicsPipeline>,
-    pub deferred_set: &'a Arc<PersistentDescriptorSet>,
-    pub lighting_set: &'a Arc<PersistentDescriptorSet>,
-}
-
-pub fn get_command_buffer(
-    command_buffer_allocator: &impl CommandBufferAllocator,
-    queue_family_index: u32,
-    clear_values: Vec<Option<ClearValue>>,
-    framebuffer_target: Arc<Framebuffer>,
-    viewport: &Viewport,
-    graphics_info: GraphicsInfo,
-) -> impl PrimaryCommandBufferAbstract {
-    let mut command_buffer_builder = AutoCommandBufferBuilder::primary(
-        command_buffer_allocator,
-        queue_family_index,
-        CommandBufferUsage::OneTimeSubmit,
-    )
-    .unwrap();
-
-    command_buffer_builder
-        .begin_render_pass(
-            RenderPassBeginInfo { 
-                clear_values,
-                ..RenderPassBeginInfo::framebuffer(framebuffer_target)
-            },
-            SubpassContents::Inline,
-        )
-        .unwrap()
-        .set_viewport(0, [viewport.clone()])
-        .bind_pipeline_graphics(graphics_info.deferred_pipeline.clone())
-        .bind_descriptor_sets(
-            PipelineBindPoint::Graphics, 
-            graphics_info.deferred_pipeline.layout().clone(), 
-            0,
-            graphics_info.deferred_set.clone()
-        )
-        .bind_vertex_buffers(0, graphics_info.vertex_buf.clone())
-        .draw(graphics_info.vertex_buf.len() as u32, 1, 0, 0)
-        .unwrap()
-        .next_subpass(SubpassContents::Inline)
-        .unwrap()
-        .bind_pipeline_graphics(graphics_info.lighting_pipeline.clone())
-        .bind_descriptor_sets(
-            PipelineBindPoint::Graphics, 
-            graphics_info.lighting_pipeline.layout().clone(), 
-            0, 
-            graphics_info.lighting_set.clone()
-        )
-        .draw(graphics_info.vertex_buf.len() as u32, 1, 0, 0)
-        .unwrap()
-        .end_render_pass()
-        .unwrap();
-    
-    command_buffer_builder.build().unwrap()
 }

@@ -1,15 +1,21 @@
 #![allow(dead_code)]
 
-use vk_setup::GraphicsInfo;
+use geometry::Object;
+use geometry::dummy::DummyVertex;
+use nalgebra_glm::{translate, identity, rotate_z, rotate_x, rotate_y, vec3};
+use shaders::{deferred_vert, deferred_frag, directional_vert, directional_frag, ambient_frag, ambient_vert};
+use transform::Transform;
 use vulkano;
 
-use vulkano::buffer::CpuBufferPool;
+use vulkano::buffer::{CpuBufferPool, TypedBufferAccess, CpuAccessibleBuffer, BufferUsage};
+use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, RenderPassBeginInfo, SubpassContents};
 use vulkano::command_buffer::allocator::{StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo};
 use vulkano::descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet};
 use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
 use vulkano::memory::allocator::{GenericMemoryAllocator, FreeListAllocator};
+use vulkano::pipeline::graphics::color_blend::{ColorBlendState, BlendFactor, AttachmentBlend, BlendOp};
 use vulkano::pipeline::graphics::rasterization::{RasterizationState, CullMode};
-use vulkano::pipeline::{GraphicsPipeline, Pipeline};
+use vulkano::pipeline::{GraphicsPipeline, Pipeline, PipelineBindPoint};
 use vulkano::pipeline::graphics::input_assembly::InputAssemblyState;
 use vulkano::pipeline::graphics::vertex_input::BuffersDefinition;
 use vulkano::pipeline::graphics::viewport::{Viewport, ViewportState};
@@ -23,6 +29,7 @@ use vulkano::format::ClearValue;
 
 use vulkano_win::VkSurfaceBuild;
 
+use winit::dpi::LogicalSize;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::{Window, WindowBuilder};
@@ -31,13 +38,18 @@ use std::sync::Arc;
 use std::time::Instant;
 
 mod geometry;
-use geometry::{Vertex, MVP};
+use geometry::loader::{Vertex, ModelBuilder};
 
 mod lighting;
 use lighting::{AmbientLight, DirectionalLight};
 
+mod camera;
+use camera::Camera;
+
 mod shaders;
 mod vk_setup;
+mod transform;
+
 
 // TODO: implement frames in flight if not implemented in the tutorial
 
@@ -69,6 +81,7 @@ impl Renderer {
         let event_loop = EventLoop::new();
         let surface = WindowBuilder::new()
             .with_title("Vulkan Window")
+            .with_inner_size(LogicalSize::new(300, 300))
             .build_vk_surface(&event_loop, instance.clone())
             .unwrap();
 
@@ -91,11 +104,15 @@ impl Renderer {
         let deferred_pass = Subpass::from(render_pass.clone(), 0).unwrap();
         let lighting_pass = Subpass::from(render_pass.clone(), 1).unwrap();
 
-        let deferred_vert = shaders::deferred_vert::load(device.clone()).unwrap();
-        let deferred_frag = shaders::deferred_frag::load(device.clone()).unwrap();
-        let lighting_vert = shaders::lighting_vert::load(device.clone()).unwrap();
-        let lighting_frag = shaders::lighting_frag::load(device.clone()).unwrap();
+        let deferred_vert = deferred_vert::load(device.clone()).unwrap();
+        let deferred_frag = deferred_frag::load(device.clone()).unwrap();
+        let directional_vert = directional_vert::load(device.clone()).unwrap();
+        let directional_frag = directional_frag::load(device.clone()).unwrap();
+        let ambient_vert = ambient_vert::load(device.clone()).unwrap();
+        let ambient_frag = ambient_frag::load(device.clone()).unwrap();
 
+
+        // RENDER PIPELINES
         let deferred_pipeline = GraphicsPipeline::start()
             .vertex_input_state(BuffersDefinition::new().vertex::<Vertex>())
             .vertex_shader(deferred_vert.entry_point("main").unwrap(), ())
@@ -108,14 +125,45 @@ impl Renderer {
             .build(device.clone())
             .unwrap();
 
-        let lighting_pipeline = GraphicsPipeline::start()
-            .vertex_input_state(BuffersDefinition::new().vertex::<Vertex>())
-            .vertex_shader(lighting_vert.entry_point("main").unwrap(), ())
+        let directional_pipeline = GraphicsPipeline::start()
+            .vertex_input_state(BuffersDefinition::new().vertex::<DummyVertex>())
+            .vertex_shader(directional_vert.entry_point("main").unwrap(), ())
             .input_assembly_state(InputAssemblyState::new())
             .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
-            .fragment_shader(lighting_frag.entry_point("main").unwrap(), ())
+            .fragment_shader(directional_frag.entry_point("main").unwrap(), ())
+            .color_blend_state(ColorBlendState::new(lighting_pass.num_color_attachments()).blend(
+                AttachmentBlend {
+                    color_op: BlendOp::Add,
+                    color_source: BlendFactor::One,
+                    color_destination: BlendFactor::One,
+                    alpha_op: BlendOp::Max, 
+                    alpha_source: BlendFactor::One,
+                    alpha_destination: BlendFactor::One,
+                }
+            ))
             .rasterization_state(RasterizationState::new().cull_mode(CullMode::Back))
-            .render_pass(lighting_pass)
+            .render_pass(lighting_pass.clone())
+            .build(device.clone())
+            .unwrap();
+
+        let ambient_pipeline = GraphicsPipeline::start()
+            .vertex_input_state(BuffersDefinition::new().vertex::<DummyVertex>())
+            .vertex_shader(ambient_vert.entry_point("main").unwrap(), ())
+            .input_assembly_state(InputAssemblyState::new())
+            .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
+            .fragment_shader(ambient_frag.entry_point("main").unwrap(), ())
+            .color_blend_state(ColorBlendState::new(lighting_pass.num_color_attachments()).blend(
+                AttachmentBlend {
+                    color_op: BlendOp::Add,
+                    color_source: BlendFactor::One,
+                    color_destination: BlendFactor::One,
+                    alpha_op: BlendOp::Max,
+                    alpha_source: BlendFactor::One,
+                    alpha_destination: BlendFactor::One,
+                }
+            ))
+            .rasterization_state(RasterizationState::new().cull_mode(CullMode::Back))
+            .render_pass(lighting_pass.clone())
             .build(device.clone())
             .unwrap();
         
@@ -124,6 +172,7 @@ impl Renderer {
             dimensions: [0.0, 0.0],
             depth_range: 0.0..1.0,
         };
+
 
         // A generic FreeListAllocator used to allocate the vertex buffer and other data
         // TODO: might want to have multiple allocators separated based on function
@@ -137,30 +186,98 @@ impl Renderer {
             StandardCommandBufferAllocatorCreateInfo::default()
         );
 
-        let vertex_buf = geometry::cube(&generic_allocator);
 
-        let uniform_buf = CpuBufferPool::<shaders::deferred_vert::ty::MVP_Data>::uniform_buffer(generic_allocator.clone());
-        let ambient_light_buf = CpuBufferPool::<shaders::lighting_frag::ty::Ambient_Light_Data>::uniform_buffer(generic_allocator.clone());
-        let directional_light_buf = CpuBufferPool::<shaders::lighting_frag::ty::Directional_Light_Data>::uniform_buffer(generic_allocator.clone());
+        // Create the camera
+        let camera_transform = Transform::new();
+        let mut camera = Camera::new(camera_transform, window.inner_size().into(), 1.2, 0.02, 100.0);
 
-        // TODO: use a descriptor pool instead of a descriptor set allocator
-        let descriptor_set_allocator = StandardDescriptorSetAllocator::new(device.clone());
+
+        // Create a dummy vertex buffer used for full-screen shaders
+        let dummy_vertices = CpuAccessibleBuffer::from_iter(
+            &generic_allocator, 
+            BufferUsage {
+                vertex_buffer: true,
+                ..Default::default()
+            }, 
+            false,
+            DummyVertex::list().into_iter(),
+        ).unwrap();
+
+
+        // Build the model
+        let vertices = ModelBuilder::from_file("data/models/monkey_smooth.obj", true).build_with_color([1.0, 1.0, 1.0]);
+        let mut object_transform = Transform::new();
+        object_transform.set_translation_mat(translate(&identity(), &vec3(0.0, 0.0, -5.0)));
+        let mut object = Object::new(object_transform, vertices, &generic_allocator);
+
 
         // Lighting
         let ambient_light = AmbientLight {
             color: [1.0, 1.0, 1.0],
             intensity: 0.2
         };
-        let directional_light = DirectionalLight {
-            position: [-4.0, -4.0, 0.0, 1.0], 
-            color: [1.0, 1.0, 1.0]
-        };
+        let directional_lights = vec![
+            DirectionalLight {position: [-4.0, 0.0, -2.0, 1.0], color: [1.0, 0.0, 0.0]},
+            DirectionalLight {position: [0.0, -4.0, 1.0, 1.0], color: [0.0, 1.0, 0.0]},
+            DirectionalLight {position: [4.0, -2.0, -1.0, 1.0], color: [0.0, 0.0, 1.0]},
+        ];
+
+
+        // BUFFERS AND DESCRIPTORS
+        // Buffers
+        let ambient_buf = CpuBufferPool::<ambient_frag::ty::Ambient_Light_Data>::uniform_buffer(generic_allocator.clone());
+        let directional_buf = CpuBufferPool::<directional_frag::ty::Directional_Light_Data>::uniform_buffer(generic_allocator.clone());
+        let model_buf = CpuBufferPool::<deferred_vert::ty::Model_Data>::uniform_buffer(generic_allocator.clone());
+
+        // TODO: use a descriptor pool instead of a descriptor set allocator
+        let descriptor_set_allocator = StandardDescriptorSetAllocator::new(device.clone());
+
+        // Layouts
+        let vp_layout = deferred_pipeline
+            .layout()
+            .set_layouts()
+            .get(0)
+            .unwrap()
+            .clone();
+
+        let model_layout = deferred_pipeline
+            .layout()
+            .set_layouts()
+            .get(1)
+            .unwrap()
+            .clone();
+
+        let ambient_layout = ambient_pipeline
+            .layout()
+            .set_layouts()
+            .get(0)
+            .unwrap()
+            .clone();
+
+        let directional_layout = directional_pipeline
+            .layout()
+            .set_layouts()
+            .get(0)
+            .unwrap()
+            .clone();
+
+        // Persistent descriptor sets
+        let mut vp_set = camera.get_vp_descriptor_set(
+            &generic_allocator, 
+            &descriptor_set_allocator, 
+            &vp_layout
+        );
+
         
+        // Time
+        let mut t: f32 = 0.0;
+        let time_start = Instant::now();
+        
+
         // Running the code
         let mut recreate_swapchain = false;
+        let mut aspect_ratio_changed = false;
         let mut previous_frame_end = Some(Box::new(sync::now(device.clone())) as Box<dyn GpuFuture>);
-
-        let rotation_start = Instant::now();
 
         // TODO: "For more fully-featured applications you’ll want to decouple program logic (for instance, simulating 
         // a game’s economy) from rendering operations."
@@ -177,70 +294,68 @@ impl Renderer {
                     ..
                 } => {
                     recreate_swapchain = true;
+                    aspect_ratio_changed = true;
+
                 },
                 Event::RedrawEventsCleared => {
                     previous_frame_end.as_mut().take().unwrap().cleanup_finished();
 
-                    let uniform_subbuffer = {
-                        let elapsed = rotation_start.elapsed().as_secs_f32();
-                        let dimensions: [u32; 2] = window.inner_size().into();
-                        let mvp = MVP::perspective(dimensions[0] as f32 / dimensions[1] as f32, elapsed);
-                        let uniform_data = shaders::deferred_vert::ty::MVP_Data {
-                            model: mvp.model.into(),
-                            view: mvp.view.into(),
-                            projection: mvp.projection.into(),
+                    // Update time-related variables
+                    let prev_t = t;
+                    t = time_start.elapsed().as_secs_f32();
+                    let delta = t - prev_t;
+
+                    // Update the object's transform
+                    object.transform.set_translation_mat(translate(&identity(), &vec3(0.0, t.sin(), -5.0)));
+                    object.transform.set_rotation_mat({
+                        let mut rotation = identity();
+                        rotation = rotate_y(&rotation, t);
+                        rotation = rotate_x(&rotation, t / 2.);
+                        rotation = rotate_z(&rotation, t / 3.);
+                        rotation
+                    });
+
+                    let model_subbuffer = {
+                        let (model_mat, normal_mat) = object.transform.get_matrices();
+                        let uniform_data = deferred_vert::ty::Model_Data {
+                            model: model_mat.into(),
+                            normals: normal_mat.into(),
                         };
-                        uniform_buf.from_data(uniform_data).unwrap()
+                        model_buf.from_data(uniform_data).unwrap()
                     };
+                    let model_set = PersistentDescriptorSet::new(
+                        &descriptor_set_allocator,
+                        model_layout.clone(),
+                        [
+                            WriteDescriptorSet::buffer(0, model_subbuffer)
+                        ]
+                    ).unwrap();
 
                     let ambient_subbuffer = {
-                        let uniform_data = shaders::lighting_frag::ty::Ambient_Light_Data {
+                        let uniform_data = ambient_frag::ty::Ambient_Light_Data {
                             color: ambient_light.color.into(),
                             intensity: ambient_light.intensity.into()
                         };
-                        ambient_light_buf.from_data(uniform_data).unwrap()
+                        ambient_buf.from_data(uniform_data).unwrap()
                     };
-
-                    let directional_subbuffer = {
-                        let uniform_data = shaders::lighting_frag::ty::Directional_Light_Data {
-                            color: directional_light.color.into(),
-                            position: directional_light.position.into()
-                        };
-                        directional_light_buf.from_data(uniform_data).unwrap()
-                    };
-
-                    let deferred_layout = deferred_pipeline
-                        .layout()
-                        .set_layouts()
-                        .get(0)
-                        .unwrap();
                     // TODO: use a different descriptor set because PersistentDescriptorSet is expected to be long-lived
-                    let deferred_set = PersistentDescriptorSet::new(
+                    let ambient_set = PersistentDescriptorSet::new(
                         &descriptor_set_allocator,
-                        deferred_layout.clone(),
-                        [
-                            WriteDescriptorSet::buffer(0, uniform_subbuffer.clone()),
-                        ],
-                    ).unwrap();
-
-                    let lighting_layout = lighting_pipeline
-                        .layout()
-                        .set_layouts()
-                        .get(0)
-                        .unwrap();
-                    // TODO: use a different descriptor set because PersistentDescriptorSet is expected to be long-lived
-                    let lighting_set = PersistentDescriptorSet::new(
-                        &descriptor_set_allocator,
-                        lighting_layout.clone(),
+                        ambient_layout.clone(),
                         [
                             WriteDescriptorSet::image_view(0, color_buffer.clone()),
-                            WriteDescriptorSet::image_view(1, normal_buffer.clone()),
-                            WriteDescriptorSet::buffer(2, uniform_subbuffer.clone()),
-                            WriteDescriptorSet::buffer(3, ambient_subbuffer),
-                            WriteDescriptorSet::buffer(4, directional_subbuffer)
+                            WriteDescriptorSet::buffer(1, ambient_subbuffer),
                         ],
-                    ).unwrap();
+                    ).unwrap();                    
 
+                    if aspect_ratio_changed {
+                        camera.update_aspect_ratio(window.inner_size().into());
+                        vp_set = camera.get_vp_descriptor_set(
+                            &generic_allocator, 
+                            &descriptor_set_allocator, 
+                            &vp_layout
+                        );
+                    }
 
                     // Recreate the swapchain if it was invalidated, such as by a window resize
                     if recreate_swapchain {
@@ -276,27 +391,88 @@ impl Renderer {
 
                     // Set the clear color
                     let clear_values: Vec<Option<ClearValue>> = vec![
-                        Some(ClearValue::Float([0.5, 0.0, 1.0, 1.0])),
+                        Some(ClearValue::Float([0.0, 0.0, 0.0, 1.0])),
                         Some(ClearValue::Float([0.0, 0.0, 0.0, 1.0])),
                         Some(ClearValue::Float([0.0, 0.0, 0.0, 1.0])),
                         Some(ClearValue::Depth(1f32)),
                     ];
 
                     // Create a command buffer, which holds a list of commands that rell the graphics hardware what to do
-                    let command_buffer = vk_setup::get_command_buffer(
-                        &command_buffer_allocator, 
+                    let mut command_buffer_builder = AutoCommandBufferBuilder::primary(
+                        &command_buffer_allocator,
                         queue.queue_family_index(),
-                        clear_values,
-                        framebuffers[image_num as usize].clone(),
-                        &viewport, 
-                        GraphicsInfo {
-                            vertex_buf: &vertex_buf,
-                            deferred_pipeline: &deferred_pipeline,
-                            deferred_set: &deferred_set, 
-                            lighting_pipeline: &lighting_pipeline,
-                            lighting_set: &lighting_set
-                        },
-                    );
+                        CommandBufferUsage::OneTimeSubmit,
+                    ).unwrap();
+
+                    // Add albedo-related commands to the command buffer
+                    command_buffer_builder
+                        .begin_render_pass(
+                            RenderPassBeginInfo { 
+                                clear_values,
+                                ..RenderPassBeginInfo::framebuffer(framebuffers[image_num as usize].clone())
+                            },
+                            SubpassContents::Inline,
+                        )
+                        .unwrap()
+                        .set_viewport(0, [viewport.clone()])
+                        .bind_pipeline_graphics(deferred_pipeline.clone())
+                        .bind_descriptor_sets(
+                            PipelineBindPoint::Graphics, 
+                            deferred_pipeline.layout().clone(), 
+                            0,
+                            (vp_set.clone(), model_set.clone())
+                        )
+                        .bind_vertex_buffers(0, object.vertex_buffer().clone())
+                        .draw(object.vertex_buffer().len() as u32, 1, 0, 0)
+                        .unwrap()
+                        .next_subpass(SubpassContents::Inline)
+                        .unwrap();
+
+                    // Record directional lights into the command buffer
+                    for d_light in directional_lights.iter() {
+                        let directional_subbuffer = crate::lighting::generate_directional_buffer(&directional_buf, &d_light);
+                        let directional_set = PersistentDescriptorSet::new(
+                            &descriptor_set_allocator,
+                            directional_layout.clone(),
+                            [ 
+                                WriteDescriptorSet::image_view(0, color_buffer.clone()),
+                                WriteDescriptorSet::image_view(1, normal_buffer.clone()),
+                                WriteDescriptorSet::buffer(2, directional_subbuffer)
+                            ],
+                        ).unwrap();
+                        command_buffer_builder
+                            .bind_pipeline_graphics(directional_pipeline.clone())
+                            .bind_descriptor_sets(
+                                PipelineBindPoint::Graphics,
+                                directional_pipeline.layout().clone(),
+                                0,
+                                directional_set.clone(),
+                            )
+                            .bind_vertex_buffers(0, dummy_vertices.clone())
+                            .draw(dummy_vertices.len() as u32, 1, 0, 0)
+                            .unwrap();
+                    }
+
+                    // Record ambient lights into the command buffer
+                    command_buffer_builder
+                        .bind_pipeline_graphics(ambient_pipeline.clone())
+                        .bind_descriptor_sets(
+                            PipelineBindPoint::Graphics,
+                            ambient_pipeline.layout().clone(),
+                            0,
+                            ambient_set.clone(),
+                        )
+                        .bind_vertex_buffers(0, dummy_vertices.clone())
+                        .draw(dummy_vertices.len() as u32, 1, 0, 0)
+                        .unwrap();
+
+                    // End the render pass
+                    command_buffer_builder
+                        .end_render_pass()
+                        .unwrap();
+
+                    // Build the command buffer
+                    let command_buffer = command_buffer_builder.build().unwrap();
 
                     let future = previous_frame_end
                         .take()
@@ -323,6 +499,8 @@ impl Renderer {
                             previous_frame_end = Some(Box::new(sync::now(device.clone())));
                         }
                     }
+
+                    // std::thread::sleep(std::time::Duration::from_millis(1000 / 40))
 
                     // TODO: In complicated programs it’s likely that one or more of the operations we’ve just scheduled 
                     // will block. This happens when the graphics hardware can not accept further commands and the program 

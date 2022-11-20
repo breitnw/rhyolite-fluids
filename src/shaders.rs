@@ -1,8 +1,7 @@
-// Deferred vertex shader
 pub mod deferred_vert {
     vulkano_shaders::shader!{
         ty: "vertex",
-        path: "src/shaders/deferred.vs",
+        path: "src/shaders/deferred.vert",
         types_meta: {
             use bytemuck::{Pod, Zeroable};
             #[derive(Clone, Copy, Zeroable, Pod)]
@@ -10,19 +9,17 @@ pub mod deferred_vert {
     }
 }
 
-// Deferred fragment shader
 pub mod deferred_frag {
     vulkano_shaders::shader!{
         ty: "fragment",
-        path: "src/shaders/deferred.fs",
+        path: "src/shaders/deferred.frag",
     }
 }
 
-// Lighting vertex shader
-pub mod lighting_vert {
+pub mod directional_vert {
     vulkano_shaders::shader!{
         ty: "vertex",
-        path: "src/shaders/lighting.vs",
+        path: "src/shaders/lighting/directional.vert",
         types_meta: {
             use bytemuck::{Pod, Zeroable};
             #[derive(Clone, Copy, Zeroable, Pod)]
@@ -30,11 +27,32 @@ pub mod lighting_vert {
     }
 }
 
-// Lighting fragment shader
-pub mod lighting_frag {
+pub mod directional_frag {
     vulkano_shaders::shader!{
         ty: "fragment",
-        path: "src/shaders/lighting.fs",
+        path: "src/shaders/lighting/directional.frag",
+        types_meta: {
+            use bytemuck::{Pod, Zeroable};
+            #[derive(Clone, Copy, Zeroable, Pod)]
+        },
+    }
+}
+
+pub mod ambient_vert {
+    vulkano_shaders::shader!{
+        ty: "vertex",
+        path: "src/shaders/lighting/ambient.vert",
+        types_meta: {
+            use bytemuck::{Pod, Zeroable};
+            #[derive(Clone, Copy, Zeroable, Pod)]
+        },
+    }
+}
+
+pub mod ambient_frag {
+    vulkano_shaders::shader!{
+        ty: "fragment",
+        path: "src/shaders/lighting/ambient.frag",
         types_meta: {
             use bytemuck::{Pod, Zeroable};
             #[derive(Clone, Copy, Zeroable, Pod)]
