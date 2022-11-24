@@ -1,3 +1,7 @@
+use std::sync::Arc;
+
+use vulkano::{shader::ShaderModule, device::Device};
+
 pub mod deferred_vert {
     vulkano_shaders::shader!{
         ty: "vertex",
@@ -20,10 +24,6 @@ pub mod directional_vert {
     vulkano_shaders::shader!{
         ty: "vertex",
         path: "src/shaders/lighting/directional.vert",
-        types_meta: {
-            use bytemuck::{Pod, Zeroable};
-            #[derive(Clone, Copy, Zeroable, Pod)]
-        },
     }
 }
 
@@ -42,10 +42,6 @@ pub mod ambient_vert {
     vulkano_shaders::shader!{
         ty: "vertex",
         path: "src/shaders/lighting/ambient.vert",
-        types_meta: {
-            use bytemuck::{Pod, Zeroable};
-            #[derive(Clone, Copy, Zeroable, Pod)]
-        },
     }
 }
 
@@ -57,5 +53,26 @@ pub mod ambient_frag {
             use bytemuck::{Pod, Zeroable};
             #[derive(Clone, Copy, Zeroable, Pod)]
         },
+    }
+}
+
+pub struct Shaders {
+    pub deferred_vert: Arc<ShaderModule>,
+    pub deferred_frag: Arc<ShaderModule>,
+    pub directional_vert: Arc<ShaderModule>,
+    pub directional_frag: Arc<ShaderModule>,
+    pub ambient_vert: Arc<ShaderModule>,
+    pub ambient_frag: Arc<ShaderModule>,
+}
+impl Shaders {
+    pub fn default(device: &Arc<Device>) -> Self {
+        Self { 
+            deferred_vert: deferred_vert::load(device.clone()).unwrap(),
+            deferred_frag: deferred_frag::load(device.clone()).unwrap(),
+            directional_vert: directional_vert::load(device.clone()).unwrap(),
+            directional_frag: directional_frag::load(device.clone()).unwrap(),
+            ambient_vert: ambient_vert::load(device.clone()).unwrap(),
+            ambient_frag: ambient_frag::load(device.clone()).unwrap(),
+        }
     }
 }
