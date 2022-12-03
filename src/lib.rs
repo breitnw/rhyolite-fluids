@@ -142,7 +142,7 @@ impl Rhyolite {
                             - if held_keys.contains(&VirtualKeyCode::Right) { CAM_ROT_SPEED } else { 0.0 },
                         0.0,
                     );
-                    if !(camera_move.is_empty() && camera_rotate.is_empty()) {
+                    if !(camera_move.magnitude() == 0.0 && camera_rotate.magnitude() == 0.0) {
                         camera_euler += camera_rotate * delta;
                         camera_euler.x = camera_euler.x.clamp(-3.1415 / 2.0, 3.1415 / 2.0);
                         camera_pos += nalgebra_glm::rotate_y_vec3(&camera_move, camera_euler.y) * delta;
@@ -150,7 +150,6 @@ impl Rhyolite {
                         let transform = camera.transform_mut();
                         transform.set_rotation_mat(rotate_z(&rotate_x(&rotate_y(&identity(), camera_euler.y), camera_euler.x), camera_euler.z));
                         transform.set_translation_mat(translate(&identity(), &camera_pos));
-                        
                     }
                     
                     renderer.start(&mut camera);

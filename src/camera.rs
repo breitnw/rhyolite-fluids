@@ -63,7 +63,7 @@ impl Camera {
     }
 
     pub(crate) fn is_configured(&self) -> bool {
-        self.config.is_none()
+        self.config.is_some()
     }
 
     pub(crate) fn get_vp_descriptor_set(
@@ -95,6 +95,7 @@ impl Camera {
 
 
     pub fn transform_mut(&mut self) -> &mut Transform {
+        self.needs_update = true;
         &mut self.transform
     }
     pub fn transform(&self) -> &Transform {
