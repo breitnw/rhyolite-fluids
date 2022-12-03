@@ -6,11 +6,13 @@ use winit::window::Window;
 
 use crate::{transform::Transform, shaders::deferred_vert, UnconfiguredError};
 pub struct Camera {
+    transform: Transform,
+
     view: TMat4<f32>,
     fovy: f32, 
     near_clipping_plane: f32, 
     far_clipping_plane: f32,
-    update_required: bool,
+    needs_update: bool,
 
     config: Option<CameraConfig>,   
 }
@@ -30,10 +32,11 @@ impl Camera {
     ) -> Self {
         Camera {
             view: transform.get_rendering_matrices().0.try_inverse().unwrap(),
+            transform,
             fovy,
             near_clipping_plane,
             far_clipping_plane,
-            update_required: true,
+            needs_update: true,
             config: None,
         }
     }
@@ -43,7 +46,7 @@ impl Camera {
         let aspect_ratio = dimensions[0] as f32 / dimensions[1] as f32;
         let projection = perspective(aspect_ratio, self.fovy, self.near_clipping_plane, self.far_clipping_plane);
         
-        self.update_required = true;
+        self.needs_update = true;
         self.config = Some(CameraConfig {
             aspect_ratio,
             projection,
@@ -69,9 +72,9 @@ impl Camera {
         descriptor_set_layout: &Arc<DescriptorSetLayout>,
         vp_buffer_pool: &CpuBufferPool<deferred_vert::ty::VP_Data>
     ) -> Result<Arc<PersistentDescriptorSet>, UnconfiguredError> {
-        if self.update_required {
-            self.update_required = false;
-            println!("generating vp subbuffer");
+        if self.needs_update {
+            self.needs_update = false;
+            self.view = self.transform.get_rendering_matrices().0.try_inverse().unwrap();
             self.get_config_mut()?.vp_subbuffer = Some(vp_buffer_pool.from_data(
                 deferred_vert::ty::VP_Data {
                     view: self.view.into(),
@@ -88,5 +91,13 @@ impl Camera {
                 WriteDescriptorSet::buffer(0, self.get_config()?.vp_subbuffer.as_ref().unwrap().clone()),
             ],
         ).unwrap())
+    }
+
+
+    pub fn transform_mut(&mut self) -> &mut Transform {
+        &mut self.transform
+    }
+    pub fn transform(&self) -> &Transform {
+        &self.transform
     }
 }
