@@ -1,4 +1,4 @@
-use nalgebra_glm::{TMat4, inverse_transpose, identity};
+use nalgebra_glm::{TMat4, inverse_transpose, identity, vec3, scaling};
 
 pub struct Transform{
     model: TMat4<f32>,
@@ -34,8 +34,9 @@ impl Transform {
     }
 
     /// Gets the model and normal transformation matrices
-    pub fn get_matrices(&mut self) -> (TMat4<f32>, TMat4<f32>) {
+    pub fn get_rendering_matrices(&mut self) -> (TMat4<f32>, TMat4<f32>) {
         if self.update_required {
+            // The model matrix is multiplied by a scaling matrix to invert the y-axis
             self.model = self.translation * self.rotation * self.scale;
             self.normals = inverse_transpose(self.model);
             self.update_required = false;

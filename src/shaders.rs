@@ -56,23 +56,55 @@ pub mod ambient_frag {
     }
 }
 
+pub mod light_obj_vert {
+    vulkano_shaders::shader!{
+        ty: "vertex",
+        path: "src/shaders/lighting/light_obj.vert",
+        types_meta: {
+            use bytemuck::{Pod, Zeroable};
+            #[derive(Clone, Copy, Zeroable, Pod)]
+        },
+    }
+}
+
+pub mod light_obj_frag {
+    vulkano_shaders::shader!{
+        ty: "fragment",
+        path: "src/shaders/lighting/light_obj.frag",
+    }
+}
+
+// TODO: find a better way to do this
+
+pub struct ShaderModulePair {
+    pub vert: Arc<ShaderModule>,
+    pub frag: Arc<ShaderModule>,
+}
 pub struct Shaders {
-    pub deferred_vert: Arc<ShaderModule>,
-    pub deferred_frag: Arc<ShaderModule>,
-    pub directional_vert: Arc<ShaderModule>,
-    pub directional_frag: Arc<ShaderModule>,
-    pub ambient_vert: Arc<ShaderModule>,
-    pub ambient_frag: Arc<ShaderModule>,
+    pub deferred: ShaderModulePair,
+    pub directional: ShaderModulePair,
+    pub ambient: ShaderModulePair,
+    pub light_obj: ShaderModulePair
 }
 impl Shaders {
     pub fn default(device: &Arc<Device>) -> Self {
         Self { 
-            deferred_vert: deferred_vert::load(device.clone()).unwrap(),
-            deferred_frag: deferred_frag::load(device.clone()).unwrap(),
-            directional_vert: directional_vert::load(device.clone()).unwrap(),
-            directional_frag: directional_frag::load(device.clone()).unwrap(),
-            ambient_vert: ambient_vert::load(device.clone()).unwrap(),
-            ambient_frag: ambient_frag::load(device.clone()).unwrap(),
+            deferred: ShaderModulePair { 
+                vert: deferred_vert::load(device.clone()).unwrap(), 
+                frag: deferred_frag::load(device.clone()).unwrap(),
+            },
+            directional: ShaderModulePair { 
+                vert: directional_vert::load(device.clone()).unwrap(), 
+                frag: directional_frag::load(device.clone()).unwrap(),
+            },
+            ambient: ShaderModulePair { 
+                vert: ambient_vert::load(device.clone()).unwrap(), 
+                frag: ambient_frag::load(device.clone()).unwrap(),
+            },
+            light_obj: ShaderModulePair { 
+                vert: light_obj_vert::load(device.clone()).unwrap(), 
+                frag: light_obj_frag::load(device.clone()).unwrap(),
+            },
         }
     }
 }

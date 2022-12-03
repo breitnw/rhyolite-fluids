@@ -16,7 +16,8 @@ pub struct DirectionalLight {
     pub color: [f32; 3]
 }
 
-pub(crate) fn generate_directional_buffer(
+// TODO: Do the same thing with this that was done with the camera (not recreating buffers)
+pub(crate) fn get_directional_buffer(
     pool: &CpuBufferPool<directional_frag::ty::Directional_Light_Data>,
     light: &DirectionalLight,
 ) -> Arc<CpuBufferPoolSubbuffer<directional_frag::ty::Directional_Light_Data>> {

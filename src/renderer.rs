@@ -1,7 +1,7 @@
-use crate::{UnconfiguredError, vk_setup};
+use crate::UnconfiguredError;
 use crate::geometry::Object;
 use crate::geometry::dummy::DummyVertex;
-use crate::geometry::loader::Vertex;
+use crate::geometry::loader::ColorVertex;
 use crate::shaders::{deferred_vert, directional_frag, ambient_frag, Shaders};
 use crate::lighting::{AmbientLight, DirectionalLight, self};
 use crate::camera::Camera;
@@ -61,12 +61,11 @@ pub struct Renderer {
     pub buffer_allocator: Arc<GenericMemoryAllocator<Arc<FreeListAllocator>>>, // TODO: make this private
     descriptor_set_allocator: StandardDescriptorSetAllocator,
     command_buffer_allocator: StandardCommandBufferAllocator,
-    
-    camera: Camera,
 
     ambient_buf: Option<Arc<CpuAccessibleBuffer<ambient_frag::ty::Ambient_Light_Data>>>,
-    model_buf_pool: CpuBufferPool<deferred_vert::ty::Model_Data>,
     directional_buf_pool: CpuBufferPool<directional_frag::ty::Directional_Light_Data>,
+    model_buf_pool: CpuBufferPool<deferred_vert::ty::Model_Data>,
+    vp_buf_pool: CpuBufferPool<deferred_vert::ty::VP_Data>,
 
     deferred_pipeline: Arc<GraphicsPipeline>,
     directional_pipeline: Arc<GraphicsPipeline>,
@@ -79,7 +78,7 @@ pub struct Renderer {
     dummy_vertices: Arc<CpuAccessibleBuffer<[DummyVertex]>>,
     viewport: Viewport,
     previous_frame_end: Option<Box<dyn GpuFuture>>,
-    vp_set: Arc<PersistentDescriptorSet>,
+    vp_set: Option<Arc<PersistentDescriptorSet>>,
 
     commands: Option<AutoCommandBufferBuilder<PrimaryAutoCommandBuffer<StandardCommandBufferAlloc>, StandardCommandBufferAllocator>>,
     image_idx: u32,
@@ -90,7 +89,7 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub fn new(event_loop: &EventLoop<()>, mut camera: Camera) -> Self { 
+    pub fn new(event_loop: &EventLoop<()>) -> Self { 
         // Create the instance, the "root" object of all Vulkan operations
         let instance = crate::vk_setup::get_instance();
 
@@ -119,11 +118,11 @@ impl Renderer {
 
         // Render pipelines
         let deferred_pipeline = GraphicsPipeline::start()
-            .vertex_input_state(BuffersDefinition::new().vertex::<Vertex>())
-            .vertex_shader(shaders.deferred_vert.entry_point("main").unwrap(), ())
+            .vertex_input_state(BuffersDefinition::new().vertex::<ColorVertex>())
+            .vertex_shader(shaders.deferred.vert.entry_point("main").unwrap(), ())
             .input_assembly_state(InputAssemblyState::new())
             .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
-            .fragment_shader(shaders.deferred_frag.entry_point("main").unwrap(), ())
+            .fragment_shader(shaders.deferred.frag.entry_point("main").unwrap(), ())
             .depth_stencil_state(DepthStencilState::simple_depth_test())
             .rasterization_state(RasterizationState::new().cull_mode(CullMode::Back))
             .render_pass(deferred_pass)
@@ -132,10 +131,10 @@ impl Renderer {
 
         let directional_pipeline = GraphicsPipeline::start()
             .vertex_input_state(BuffersDefinition::new().vertex::<DummyVertex>())
-            .vertex_shader(shaders.directional_vert.entry_point("main").unwrap(), ())
+            .vertex_shader(shaders.directional.vert.entry_point("main").unwrap(), ())
             .input_assembly_state(InputAssemblyState::new())
             .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
-            .fragment_shader(shaders.directional_frag.entry_point("main").unwrap(), ())
+            .fragment_shader(shaders.directional.frag.entry_point("main").unwrap(), ())
             .color_blend_state(ColorBlendState::new(lighting_pass.num_color_attachments()).blend(
                 AttachmentBlend {
                     color_op: BlendOp::Add,
@@ -153,10 +152,10 @@ impl Renderer {
 
         let ambient_pipeline = GraphicsPipeline::start()
             .vertex_input_state(BuffersDefinition::new().vertex::<DummyVertex>())
-            .vertex_shader(shaders.ambient_vert.entry_point("main").unwrap(), ())
+            .vertex_shader(shaders.ambient.vert.entry_point("main").unwrap(), ())
             .input_assembly_state(InputAssemblyState::new())
             .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
-            .fragment_shader(shaders.ambient_frag.entry_point("main").unwrap(), ())
+            .fragment_shader(shaders.ambient.frag.entry_point("main").unwrap(), ())
             .color_blend_state(ColorBlendState::new(lighting_pass.num_color_attachments()).blend(
                 AttachmentBlend {
                     color_op: BlendOp::Add,
@@ -179,15 +178,11 @@ impl Renderer {
         let descriptor_set_allocator = StandardDescriptorSetAllocator::new(device.clone());
         let command_buffer_allocator = StandardCommandBufferAllocator::new(device.clone(), StandardCommandBufferAllocatorCreateInfo::default());
 
-        // Configure the camera
-        camera.configure(&window, &buffer_allocator);
-        let vp_layout = deferred_pipeline.layout().set_layouts().get(0).unwrap().clone();
-        let vp_set = camera.get_vp_descriptor_set(&descriptor_set_allocator, &vp_layout).unwrap();
-
         // Buffers and buffer pools
         let ambient_buf = None;
         let directional_buf_pool = CpuBufferPool::<directional_frag::ty::Directional_Light_Data>::uniform_buffer(buffer_allocator.clone());
         let model_buf_pool = CpuBufferPool::<deferred_vert::ty::Model_Data>::uniform_buffer(buffer_allocator.clone());
+        let vp_buf_pool = CpuBufferPool::<deferred_vert::ty::VP_Data>::uniform_buffer(buffer_allocator.clone());
 
         let mut viewport = Viewport {
             origin: [0.0, 0.0],
@@ -222,8 +217,7 @@ impl Renderer {
             surface, 
             window,
             device, 
-            queue, 
-            camera, 
+            queue,  
             swapchain,
             render_pass,
 
@@ -234,6 +228,7 @@ impl Renderer {
             ambient_buf,
             directional_buf_pool,
             model_buf_pool,
+            vp_buf_pool,
 
             ambient_pipeline,
             directional_pipeline,
@@ -244,7 +239,7 @@ impl Renderer {
             normal_buffer,
 
             dummy_vertices,
-            vp_set,
+            vp_set: None,
             viewport,
             previous_frame_end,
 
@@ -275,23 +270,24 @@ impl Renderer {
     }
 
     /// Updates the aspect ratio of the camera. Should be called when the window is resized
-    pub fn update_aspect_ratio(&mut self) {
-        self.camera.configure(&self.window, &self.buffer_allocator);
-        let vp_layout = self.deferred_pipeline.layout().set_layouts().get(0).unwrap().clone();
-        self.vp_set = self.camera.get_vp_descriptor_set(
-            &self.descriptor_set_allocator, 
-            &vp_layout
-        ).unwrap();
+    pub fn update_aspect_ratio(&mut self, camera: &mut Camera) {
+        camera.configure(&self.window);
     }
 
-    pub fn start(&mut self) {
+    pub fn start<'a>(&mut self, camera: &mut Camera) {
+        if !camera.is_configured() {
+            camera.configure(&self.window);
+        }
+        let vp_layout = self.deferred_pipeline.layout().set_layouts().get(0).unwrap().clone();
+        self.vp_set = Some(camera.get_vp_descriptor_set(&self.descriptor_set_allocator, &vp_layout, &self.vp_buf_pool).unwrap());
+
         self.previous_frame_end.as_mut()
             .expect("previous_frame_end future is null. Did you remember to finish the previous frame?")
             .cleanup_finished();
 
         if self.should_recreate_swapchain { 
             self.recreate_swapchain(); 
-            self.update_aspect_ratio();
+            self.update_aspect_ratio(camera);
         }
 
         // Get an image from the swapchain, recreating the swapchain if its settings are suboptimal
@@ -393,8 +389,6 @@ impl Renderer {
         self.commands = None;
         self.render_stage = RenderStage::Stopped;
 
-        // std::thread::sleep(std::time::Duration::from_millis(1000 / 40))
-
         // TODO: In complicated programs it’s likely that one or more of the operations we’ve just scheduled 
         // will block. This happens when the graphics hardware can not accept further commands and the program 
         // has to wait until it can. Vulkan provides no easy way to check for this. Because of this, any serious 
@@ -421,7 +415,7 @@ impl Renderer {
         }
 
         let model_subbuffer = {
-            let (model_mat, normal_mat) = object.transform.get_matrices();
+            let (model_mat, normal_mat) = object.transform.get_rendering_matrices();
             let uniform_data = deferred_vert::ty::Model_Data {
                 model: model_mat.into(),
                 normals: normal_mat.into(),
@@ -445,7 +439,7 @@ impl Renderer {
                 PipelineBindPoint::Graphics, 
                 self.deferred_pipeline.layout().clone(), 
                 0,
-                (self.vp_set.clone(), model_set.clone())
+                (self.vp_set.as_ref().unwrap().clone(), model_set.clone())
             )
             // TODO: possible to bind multiple vertex buffers at once?
             .bind_vertex_buffers(0, object.vertex_buffer()?.clone())
@@ -539,7 +533,7 @@ impl Renderer {
             }
         }
 
-        let directional_subbuffer = lighting::generate_directional_buffer(&self.directional_buf_pool, &directional_light);
+        let directional_subbuffer = lighting::get_directional_buffer(&self.directional_buf_pool, &directional_light);
         let directional_layout = self.directional_pipeline.layout().set_layouts().get(0).unwrap().clone();
         let directional_set = PersistentDescriptorSet::new(
             &self.descriptor_set_allocator,

@@ -5,8 +5,8 @@ use vulkano::{buffer::{CpuAccessibleBuffer, BufferUsage}, memory::allocator::Mem
 use crate::{transform::Transform, UnconfiguredError};
 
 pub mod loader;
-use loader::Vertex;
-vulkano::impl_vertex!(Vertex, position, normal, color);
+use loader::ColorVertex;
+vulkano::impl_vertex!(ColorVertex, position, normal, color);
 
 pub mod dummy;
 use dummy::DummyVertex;
@@ -14,17 +14,17 @@ vulkano::impl_vertex!(DummyVertex, position);
 
 
 struct ObjectConfig {
-    vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex]>>,
+    vertex_buffer: Arc<CpuAccessibleBuffer<[ColorVertex]>>,
 }
 pub struct Object {
-    vertices: Option<Vec<Vertex>>,
+    vertices: Option<Vec<ColorVertex>>,
     pub transform: Transform,
 
     config: Option<ObjectConfig>,
 }
 
 impl Object {
-    pub fn new(transform: Transform, vertices: Vec<Vertex>) -> Self {
+    pub fn new(transform: Transform, vertices: Vec<ColorVertex>) -> Self {
         Self {
             vertices: Some(vertices),
             transform,
@@ -51,7 +51,7 @@ impl Object {
         self.config.as_ref().ok_or(UnconfiguredError("Object not properly configured"))
     }
 
-    pub(crate) fn vertex_buffer(&self) -> Result<&Arc<CpuAccessibleBuffer<[Vertex]>>, UnconfiguredError> {
+    pub(crate) fn vertex_buffer(&self) -> Result<&Arc<CpuAccessibleBuffer<[ColorVertex]>>, UnconfiguredError> {
         Ok(&self.get_config()?.vertex_buffer)
     }
 }

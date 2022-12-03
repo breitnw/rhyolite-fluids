@@ -22,20 +22,22 @@ mod camera;
 
 // TODO: implement frames in flight if not implemented in the tutorial
 
+// TODO: fix point lights to use a position buffer for relative distance instead of normal buffer
+
 pub struct Rhyolite {
     renderer: Renderer,
 }
 impl Rhyolite {
     pub fn run() {
         let camera_transform = Transform::new();
-        let camera = Camera::new(camera_transform, 1.2, 0.02, 100.0);
+        let mut camera = Camera::new(camera_transform, 1.2, 0.02, 100.0);
 
         let event_loop = EventLoop::new();
-        let mut renderer = Renderer::new(&event_loop, camera);
+        let mut renderer = Renderer::new(&event_loop);
 
         // Build the models
         let mut suzanne = {
-            let vertices = ModelBuilder::from_file("data/models/monkey_smooth.obj", false).build_with_color([1.0, 1.0, 1.0]);
+            let vertices = ModelBuilder::from_file("data/models/monkey_smooth.obj", true).build_with_color([1.0, 1.0, 1.0]);
             let mut object_transform = Transform::new();
             object_transform.set_translation_mat(translate(&identity(), &vec3(-1.0, -2.0, -5.0)));
             Object::new(object_transform, vertices)
@@ -43,7 +45,7 @@ impl Rhyolite {
         suzanne.configure(&renderer.buffer_allocator);
 
         let mut teapot = {
-            let vertices = ModelBuilder::from_file("data/models/teapot.obj", false).build_with_color([1.0, 1.0, 1.0]);
+            let vertices = ModelBuilder::from_file("data/models/teapot.obj", true).build_with_color([1.0, 1.0, 1.0]);
             let mut object_transform = Transform::new();
             object_transform.set_translation_mat(translate(&identity(), &vec3(3.0, 2.0, -10.0)));
             object_transform.set_scale_mat(scale(&identity(), &vec3(0.5, 0.5, 0.5)));
@@ -58,9 +60,11 @@ impl Rhyolite {
         };
         renderer.set_ambient(ambient_light);
         let directional_lights = vec![
-            DirectionalLight {position: [-4.0, 0.0, -2.0, 1.0], color: [1.0, 0.0, 0.0]},
-            DirectionalLight {position: [0.0, -4.0, 1.0, 1.0], color: [0.0, 1.0, 0.0]},
-            DirectionalLight {position: [4.0, -2.0, -1.0, 1.0], color: [0.0, 0.0, 1.0]},
+            // DirectionalLight {position: [-4.0, 0.0, -2.0, 1.0], color: [1.0, 0.0, 0.0]},
+            // DirectionalLight {position: [0.0, -4.0, 1.0, 1.0], color: [0.0, 1.0, 0.0]},
+            // DirectionalLight {position: [4.0, -2.0, -1.0, 1.0], color: [0.0, 0.0, 1.0]},
+            DirectionalLight {position: [0.0, -4.0, -1.0, 1.0], color: [0.0, 1.0, 0.0]},
+
         ];
 
         // Time
@@ -74,7 +78,7 @@ impl Rhyolite {
                 }
                 Event::WindowEvent { event: WindowEvent::Resized(_), .. } => {
                     renderer.recreate_swapchain();
-                    renderer.update_aspect_ratio();
+                    renderer.update_aspect_ratio(&mut camera);
                 },
                 Event::RedrawEventsCleared => {
 
@@ -83,16 +87,16 @@ impl Rhyolite {
                     t = time_start.elapsed().as_secs_f32();
                     let delta = t - prev_t;
 
-                    suzanne.transform.set_translation_mat(translate(&identity(), &vec3(-1.0, t.sin() - 0.5, -5.0)));
-                    suzanne.transform.set_rotation_mat({
-                        let mut rotation = identity();
-                        rotation = rotate_y(&rotation, t);
-                        rotation = rotate_x(&rotation, t / 2.);
-                        rotation = rotate_z(&rotation, t / 3.);
-                        rotation
-                    });
+                    // suzanne.transform.set_translation_mat(translate(&identity(), &vec3(t.cos() - 1.0,  - 0.5, -5.0)));
+                    suzanne.transform.set_translation_mat(translate(&identity(), &vec3(t.cos() * 5.0,  - 2.0, -5.0)));
+                    // suzanne.transform.set_rotation_mat({
+                    //     let mut rotation = identity();
+                    //     rotation = rotate_y(&rotation, t);
+                    //     rotation = rotate_x(&rotation, t / 2.);
+                    //     rotation = rotate_z(&rotation, t / 3.);
+                    //     rotation
+                    // });
 
-                    // teapot.transform.set_translation_mat(translate(&identity(), &vec3(0.0, t.sin(), -5.0)));
                     teapot.transform.set_rotation_mat({
                         let mut rotation = identity();
                         rotation = rotate_x(&rotation, -t);
@@ -101,7 +105,9 @@ impl Rhyolite {
                         rotation
                     });
 
-                    renderer.start();
+                    // directional_lights[0].position[0] = t.sin() * 5.0;
+
+                    renderer.start(&mut camera);
                     renderer.draw_object(&mut suzanne).unwrap();
                     renderer.draw_object(&mut teapot).unwrap();
                     renderer.draw_ambient();

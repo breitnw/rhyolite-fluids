@@ -3,7 +3,7 @@ use bytemuck::{Zeroable, Pod};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
-pub struct Vertex {
+pub struct ColorVertex {
     pub position: [f32; 3],
     pub normal: [f32; 3],
     pub color: [f32; 3],
@@ -127,13 +127,13 @@ impl ModelBuilder {
 
     /// Builds an array of vertices from the model. Does not require texture coordinates in the loaded model, but does
     /// require normals and vertices.
-    pub fn build_with_color(&self, custom_color: [f32; 3]) -> Vec<Vertex> {
+    pub fn build_with_color(&self, custom_color: [f32; 3]) -> Vec<ColorVertex> {
         let mut result = Vec::new();
         for face in &self.faces {
             let verts = face.vertex_indices;
             let norms = face.normal_indices.unwrap();
             for i in 0..3 {
-                result.push(Vertex{
+                result.push(ColorVertex{
                     position: self.vertices[verts[i]].to_arr(),
                     normal: self.normals[norms[i]].to_arr(),
                     color: custom_color,
