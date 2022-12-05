@@ -1,4 +1,4 @@
-use nalgebra_glm::{TMat4, inverse_transpose, identity};
+use nalgebra_glm::{TMat4, inverse_transpose, identity, Vec3, translate, scale};
 
 pub struct Transform{
     model: TMat4<f32>,
@@ -30,6 +30,18 @@ impl Transform {
     }
     pub fn set_scale_mat(&mut self, scale: TMat4<f32>) {
         self.scale = scale;
+        self.needs_update = true;
+    }
+
+    // TODO: function for set_rotation that takes quaternion
+    // TODO: potentially store vec3s and quaternions for later access, and generate all matrices in get_rendering_matrices
+
+    pub fn set_translation(&mut self, val: &Vec3) {
+        self.translation = translate(&identity(), val);
+        self.needs_update = true;
+    }
+    pub fn set_scale(&mut self, val: &Vec3) {
+        self.scale = scale(&identity(), val);
         self.needs_update = true;
     }
 

@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-mod renderer;
+
 
 use std::{time::Instant};
 
@@ -13,10 +13,12 @@ pub mod transform;
 pub mod geometry;
 pub mod lighting;
 pub mod camera;
-mod vk_setup;
+
+mod renderer;
 
 
 // TODO: implement frames in flight if not implemented in the tutorial
+// TODO: learn how to implement an index buffer
 // TODO: fix point lights to use a position buffer for relative distance instead of normal buffer
 
 pub struct Rhyolite {
@@ -29,10 +31,6 @@ impl Rhyolite {
         let event_loop = EventLoop::new();
         let renderer = Renderer::new(&event_loop);
         Rhyolite { renderer, event_loop: Some(event_loop) }
-    }
-
-    pub fn configure_object(&self, object: &mut Object) {
-        object.configure(&self.renderer.buffer_allocator)
     }
 
     pub fn run<F>(mut self, mut handler: F)
@@ -49,9 +47,6 @@ impl Rhyolite {
                 },
                 Event::RedrawEventsCleared => time_state.update(),
                 _ => (),
-            }
-            if event == Event::RedrawEventsCleared {
-                
             }
             handler(event, target, control_flow, &time_state, &mut self.renderer);
         });

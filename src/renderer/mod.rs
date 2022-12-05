@@ -39,6 +39,8 @@ use winit::window::{Window, WindowBuilder};
 
 use std::sync::Arc;
 
+mod vulkan_setup;
+
 #[derive(Debug, Clone, PartialEq)]
 
 enum RenderStage {
@@ -58,7 +60,7 @@ pub struct Renderer {
     swapchain: Arc<Swapchain>,
     render_pass: Arc<RenderPass>,
 
-    pub buffer_allocator: Arc<GenericMemoryAllocator<Arc<FreeListAllocator>>>, // TODO: make this private
+    buffer_allocator: Arc<GenericMemoryAllocator<Arc<FreeListAllocator>>>,
     descriptor_set_allocator: StandardDescriptorSetAllocator,
     command_buffer_allocator: StandardCommandBufferAllocator,
 
@@ -91,7 +93,7 @@ pub struct Renderer {
 impl Renderer {
     pub fn new(event_loop: &EventLoop<()>) -> Self { 
         // Create the instance, the "root" object of all Vulkan operations
-        let instance = crate::vk_setup::get_instance();
+        let instance = vulkan_setup::get_instance();
 
         let surface = WindowBuilder::new()
             .with_title("Vulkan Window")
@@ -101,18 +103,18 @@ impl Renderer {
         let window = surface.object().unwrap().clone().downcast::<Window>().unwrap();
 
         // Get the device and physical device
-        let (physical_device, device, mut queues) = crate::vk_setup::get_device(&instance, &surface);
+        let (physical_device, device, mut queues) = vulkan_setup::get_device(&instance, &surface);
         let queue = queues.next().unwrap();
 
         // Create the swapchain, an object which contains a vector of Images used for rendering and information on 
         // how to show them to the user
-        let (swapchain, images) = crate::vk_setup::get_swapchain(&physical_device, &device, &surface, &window);
+        let (swapchain, images) = vulkan_setup::get_swapchain(&physical_device, &device, &surface, &window);
 
         let shaders = Shaders::default(&device);
 
         // Declare the render pass, a structure that lets us define how the rendering process should work. Tells the hardware
         // where it can expect to find input and where it can store output
-        let render_pass = crate::vk_setup::get_render_pass(&device, swapchain.image_format());
+        let render_pass = vulkan_setup::get_render_pass(&device, swapchain.image_format());
         let deferred_pass = Subpass::from(render_pass.clone(), 0).unwrap();
         let lighting_pass = Subpass::from(render_pass.clone(), 1).unwrap();
 
@@ -191,7 +193,7 @@ impl Renderer {
         };
 
         let (framebuffers, color_buffer, normal_buffer) = 
-            crate::vk_setup::window_size_dependent_setup(&buffer_allocator, &images, render_pass.clone(), &mut viewport);
+            vulkan_setup::window_size_dependent_setup(&buffer_allocator, &images, render_pass.clone(), &mut viewport);
 
         // Create a dummy vertex buffer used for full-screen shaders
         let dummy_vertices = CpuAccessibleBuffer::from_iter(
@@ -266,12 +268,17 @@ impl Renderer {
         self.swapchain = new_swapchain;
         // TODO: use a different allocator?
         (self.framebuffers, self.color_buffer, self.normal_buffer) = 
-            crate::vk_setup::window_size_dependent_setup(&self.buffer_allocator, &new_images, self.render_pass.clone(), &mut self.viewport);
+            vulkan_setup::window_size_dependent_setup(&self.buffer_allocator, &new_images, self.render_pass.clone(), &mut self.viewport);
     }
 
     /// Updates the aspect ratio of the camera. Should be called when the window is resized
     pub fn update_aspect_ratio(&mut self, camera: &mut Camera) {
         camera.configure(&self.window);
+    }
+
+    /// Sets up necessary buffers and attaches them to the object
+    pub fn configure_object(&self, object: &mut Object) {
+        object.configure(&self.buffer_allocator)
     }
 
     pub fn start<'a>(&mut self, camera: &mut Camera) {

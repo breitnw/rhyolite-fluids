@@ -13,14 +13,16 @@ use dummy::DummyVertex;
 vulkano::impl_vertex!(DummyVertex, position);
 
 
-struct ObjectConfig {
+/// Contains data that can only be generated after being configured with the Rhyolite instance
+struct ObjectPostConfig {
     vertex_buffer: Arc<CpuAccessibleBuffer<[ColorVertex]>>,
+    // index buffer should go here
 }
 pub struct Object {
     vertices: Option<Vec<ColorVertex>>,
     pub transform: Transform,
 
-    config: Option<ObjectConfig>,
+    post_config: Option<ObjectPostConfig>,
 }
 
 impl Object {
@@ -28,7 +30,7 @@ impl Object {
         Self {
             vertices: Some(vertices),
             transform,
-            config: None,
+            post_config: None,
         }
     }
 
@@ -42,16 +44,16 @@ impl Object {
             false,
             self.vertices.take().expect("Object already configured").into_iter(),
         ).unwrap();
-        self.config = Some(ObjectConfig {
+        self.post_config = Some(ObjectPostConfig {
             vertex_buffer
         });
     }
 
-    fn get_config(&self) -> Result<&ObjectConfig, UnconfiguredError> {
-        self.config.as_ref().ok_or(UnconfiguredError("Object not properly configured"))
+    fn get_post_config(&self) -> Result<&ObjectPostConfig, UnconfiguredError> {
+        self.post_config.as_ref().ok_or(UnconfiguredError("Object not properly configured"))
     }
 
     pub(crate) fn vertex_buffer(&self) -> Result<&Arc<CpuAccessibleBuffer<[ColorVertex]>>, UnconfiguredError> {
-        Ok(&self.get_config()?.vertex_buffer)
+        Ok(&self.get_post_config()?.vertex_buffer)
     }
 }

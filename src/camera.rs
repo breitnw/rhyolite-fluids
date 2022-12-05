@@ -14,10 +14,10 @@ pub struct Camera {
     far_clipping_plane: f32,
     needs_update: bool,
 
-    config: Option<CameraConfig>,   
+    post_config: Option<CameraPostConfig>,   
 }
 
-struct CameraConfig {
+struct CameraPostConfig {
     aspect_ratio: f32,
     projection: TMat4<f32>,
     vp_subbuffer: Option<Arc<CpuBufferPoolSubbuffer<deferred_vert::ty::VP_Data>>>,
@@ -37,7 +37,7 @@ impl Camera {
             near_clipping_plane,
             far_clipping_plane,
             needs_update: true,
-            config: None,
+            post_config: None,
         }
     }
 
@@ -47,23 +47,23 @@ impl Camera {
         let projection = perspective(aspect_ratio, self.fovy, self.near_clipping_plane, self.far_clipping_plane);
         
         self.needs_update = true;
-        self.config = Some(CameraConfig {
+        self.post_config = Some(CameraPostConfig {
             aspect_ratio,
             projection,
             vp_subbuffer: None,
         });
     }
 
-    fn get_config(&self) -> Result<&CameraConfig, UnconfiguredError> {
-        self.config.as_ref().ok_or(UnconfiguredError("Camera not yet configured. Do so with `Camera::configure()` before accessing projection matrix"))
+    fn get_post_config(&self) -> Result<&CameraPostConfig, UnconfiguredError> {
+        self.post_config.as_ref().ok_or(UnconfiguredError("Camera not yet configured. Do so with `Camera::configure()` before accessing projection matrix"))
     }
 
-    fn get_config_mut(&mut self) -> Result<&mut CameraConfig, UnconfiguredError> {
-        self.config.as_mut().ok_or(UnconfiguredError("Camera not yet configured. Do so with `Camera::configure()` before accessing projection matrix"))
+    fn get_post_config_mut(&mut self) -> Result<&mut CameraPostConfig, UnconfiguredError> {
+        self.post_config.as_mut().ok_or(UnconfiguredError("Camera not yet configured. Do so with `Camera::configure()` before accessing projection matrix"))
     }
 
     pub(crate) fn is_configured(&self) -> bool {
-        self.config.is_some()
+        self.post_config.is_some()
     }
 
     pub(crate) fn get_vp_descriptor_set(
@@ -75,10 +75,10 @@ impl Camera {
         if self.needs_update {
             self.needs_update = false;
             self.view = self.transform.get_rendering_matrices().0.try_inverse().unwrap();
-            self.get_config_mut()?.vp_subbuffer = Some(vp_buffer_pool.from_data(
+            self.get_post_config_mut()?.vp_subbuffer = Some(vp_buffer_pool.from_data(
                 deferred_vert::ty::VP_Data {
                     view: self.view.into(),
-                    projection: self.get_config()?.projection.into(),
+                    projection: self.get_post_config()?.projection.into(),
                 },
             ).unwrap());
         }
@@ -88,11 +88,10 @@ impl Camera {
             descriptor_set_allocator,
             descriptor_set_layout.clone(),
             [
-                WriteDescriptorSet::buffer(0, self.get_config()?.vp_subbuffer.as_ref().unwrap().clone()),
+                WriteDescriptorSet::buffer(0, self.get_post_config()?.vp_subbuffer.as_ref().unwrap().clone()),
             ],
         ).unwrap())
     }
-
 
     pub fn transform_mut(&mut self) -> &mut Transform {
         self.needs_update = true;
