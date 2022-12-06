@@ -123,7 +123,7 @@ impl Renderer {
         let lighting_pass = Subpass::from(render_pass.clone(), 1).unwrap();
 
         // Render pipelines
-        let albedo = GraphicsPipeline::start()
+        let albedo_pipeline = GraphicsPipeline::start()
             .vertex_input_state(BuffersDefinition::new().vertex::<BasicVertex>())
             .vertex_shader(shaders.albedo.vert.entry_point("main").unwrap(), ())
             .input_assembly_state(InputAssemblyState::new())
@@ -252,7 +252,7 @@ impl Renderer {
 
             ambient_pipeline,
             directional_pipeline,
-            albedo_pipeline: albedo,
+            albedo_pipeline,
             unlit_pipeline,
 
             framebuffers,
