@@ -4,7 +4,6 @@
 
 use std::{time::Instant};
 
-use geometry::Object;
 pub use renderer::Renderer;
 use winit::{event_loop::{EventLoop, ControlFlow, EventLoopWindowTarget}, event::{Event, WindowEvent}};
 
@@ -18,8 +17,7 @@ mod renderer;
 
 
 // TODO: implement frames in flight if not implemented in the tutorial
-// TODO: learn how to implement an index buffer
-// TODO: fix point lights to use a position buffer for relative distance instead of normal buffer
+// TODO: replace PersistentDescriptorSet instances with a type expected to be shorter-lived
 
 pub struct Rhyolite {
     pub renderer: Renderer,

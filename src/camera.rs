@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use nalgebra_glm::{TMat4, perspective};
-use vulkano::{descriptor_set::{allocator::StandardDescriptorSetAllocator, layout::DescriptorSetLayout, PersistentDescriptorSet, WriteDescriptorSet}, buffer::{CpuAccessibleBuffer, BufferUsage, cpu_pool::CpuBufferPoolSubbuffer, CpuBufferPool}};
+use vulkano::{descriptor_set::{allocator::StandardDescriptorSetAllocator, layout::DescriptorSetLayout, PersistentDescriptorSet, WriteDescriptorSet}, buffer::{cpu_pool::CpuBufferPoolSubbuffer, CpuBufferPool}};
 use winit::window::Window;
 
-use crate::{transform::Transform, shaders::deferred_vert, UnconfiguredError};
+use crate::{transform::Transform, shaders::albedo_vert, UnconfiguredError};
 pub struct Camera {
     transform: Transform,
 
@@ -14,13 +14,13 @@ pub struct Camera {
     far_clipping_plane: f32,
     needs_update: bool,
 
-    post_config: Option<CameraPostConfig>,   
+    post_config: Option<CameraPostConfig>,
 }
 
 struct CameraPostConfig {
     aspect_ratio: f32,
     projection: TMat4<f32>,
-    vp_subbuffer: Option<Arc<CpuBufferPoolSubbuffer<deferred_vert::ty::VP_Data>>>,
+    vp_subbuffer: Option<Arc<CpuBufferPoolSubbuffer<albedo_vert::ty::VP_Data>>>,
 }
 
 impl Camera {
@@ -70,13 +70,13 @@ impl Camera {
         &mut self,
         descriptor_set_allocator: &StandardDescriptorSetAllocator,
         descriptor_set_layout: &Arc<DescriptorSetLayout>,
-        vp_buffer_pool: &CpuBufferPool<deferred_vert::ty::VP_Data>
+        vp_buffer_pool: &CpuBufferPool<albedo_vert::ty::VP_Data>
     ) -> Result<Arc<PersistentDescriptorSet>, UnconfiguredError> {
         if self.needs_update {
             self.needs_update = false;
             self.view = self.transform.get_rendering_matrices().0.try_inverse().unwrap();
             self.get_post_config_mut()?.vp_subbuffer = Some(vp_buffer_pool.from_data(
-                deferred_vert::ty::VP_Data {
+                albedo_vert::ty::VP_Data {
                     view: self.view.into(),
                     projection: self.get_post_config()?.projection.into(),
                 },

@@ -212,7 +212,7 @@ pub fn get_render_pass(device: &Arc<Device>, final_format: Format) -> Arc<Render
             },
             {
                 color: [final_color],
-                depth_stencil: {},
+                depth_stencil: {depth},
                 input: [color, normals]
             }
         ]

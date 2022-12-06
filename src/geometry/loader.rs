@@ -3,14 +3,20 @@ use bytemuck::{Zeroable, Pod};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
-pub struct ColorVertex {
+pub struct BasicVertex {
     pub position: [f32; 3],
     pub normal: [f32; 3],
     pub color: [f32; 3],
 }
 
-// TODO: is it possible to use an index buffer instead of this face system?
-pub struct RawVertex(f32, f32, f32);
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
+pub struct UnlitVertex {
+    pub position: [f32; 3],
+    pub color: [f32; 3],
+}
+
+struct RawVertex(f32, f32, f32);
 
 impl RawVertex {
     /// Loads vertex data from a str containing 3 values separated by whitespace, for example `0.0 0.0 0.0`
@@ -127,15 +133,31 @@ impl ModelBuilder {
 
     /// Builds an array of vertices from the model. Does not require texture coordinates in the loaded model, but does
     /// require normals and vertices.
-    pub fn build_with_color(&self, custom_color: [f32; 3]) -> Vec<ColorVertex> {
+    pub fn build_basic(&self, custom_color: [f32; 3]) -> Vec<BasicVertex> {
         let mut result = Vec::new();
         for face in &self.faces {
             let verts = face.vertex_indices;
             let norms = face.normal_indices.unwrap();
             for i in 0..3 {
-                result.push(ColorVertex{
+                result.push(BasicVertex{
                     position: self.vertices[verts[i]].to_arr(),
                     normal: self.normals[norms[i]].to_arr(),
+                    color: custom_color,
+                })
+            }
+        };
+        result
+    }
+
+    /// Builds an array of unlit vertices from the model. Does not require texture coordinates or normals in the loaded model, but 
+    /// does require vertices.
+    pub fn build_unlit(&self, custom_color: [f32; 3]) -> Vec<UnlitVertex> {
+        let mut result = Vec::new();
+        for face in &self.faces {
+            let verts = face.vertex_indices;
+            for i in 0..3 {
+                result.push(UnlitVertex{
+                    position: self.vertices[verts[i]].to_arr(),
                     color: custom_color,
                 })
             }

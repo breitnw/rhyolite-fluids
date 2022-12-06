@@ -10,7 +10,6 @@ layout(set = 0, binding = 0) uniform VP_Data {
 
 layout(set = 1, binding = 0) uniform Model_Data {
     mat4 model;
-    mat4 normals;
 } model_uniforms;
 
 layout(location = 0) out vec3 out_color;

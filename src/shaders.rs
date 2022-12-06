@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use vulkano::{shader::ShaderModule, device::Device};
 
-pub mod deferred_vert {
+pub mod albedo_vert {
     vulkano_shaders::shader!{
         ty: "vertex",
-        path: "src/shaders/deferred.vert",
+        path: "src/shaders/albedo.vert",
         types_meta: {
             use bytemuck::{Pod, Zeroable};
             #[derive(Clone, Copy, Zeroable, Pod)]
@@ -13,10 +13,10 @@ pub mod deferred_vert {
     }
 }
 
-pub mod deferred_frag {
+pub mod albedo_frag {
     vulkano_shaders::shader!{
         ty: "fragment",
-        path: "src/shaders/deferred.frag",
+        path: "src/shaders/albedo.frag",
     }
 }
 
@@ -56,10 +56,10 @@ pub mod ambient_frag {
     }
 }
 
-pub mod light_obj_vert {
+pub mod unlit_vert {
     vulkano_shaders::shader!{
         ty: "vertex",
-        path: "src/shaders/lighting/light_obj.vert",
+        path: "src/shaders/unlit.vert",
         types_meta: {
             use bytemuck::{Pod, Zeroable};
             #[derive(Clone, Copy, Zeroable, Pod)]
@@ -67,10 +67,10 @@ pub mod light_obj_vert {
     }
 }
 
-pub mod light_obj_frag {
+pub mod unlit_frag {
     vulkano_shaders::shader!{
         ty: "fragment",
-        path: "src/shaders/lighting/light_obj.frag",
+        path: "src/shaders/unlit.frag",
     }
 }
 
@@ -81,17 +81,17 @@ pub struct ShaderModulePair {
     pub frag: Arc<ShaderModule>,
 }
 pub struct Shaders {
-    pub deferred: ShaderModulePair,
+    pub albedo: ShaderModulePair,
     pub directional: ShaderModulePair,
     pub ambient: ShaderModulePair,
-    pub light_obj: ShaderModulePair
+    pub unlit: ShaderModulePair
 }
 impl Shaders {
     pub fn default(device: &Arc<Device>) -> Self {
         Self { 
-            deferred: ShaderModulePair { 
-                vert: deferred_vert::load(device.clone()).unwrap(), 
-                frag: deferred_frag::load(device.clone()).unwrap(),
+            albedo: ShaderModulePair { 
+                vert: albedo_vert::load(device.clone()).unwrap(), 
+                frag: albedo_frag::load(device.clone()).unwrap(),
             },
             directional: ShaderModulePair { 
                 vert: directional_vert::load(device.clone()).unwrap(), 
@@ -101,9 +101,9 @@ impl Shaders {
                 vert: ambient_vert::load(device.clone()).unwrap(), 
                 frag: ambient_frag::load(device.clone()).unwrap(),
             },
-            light_obj: ShaderModulePair { 
-                vert: light_obj_vert::load(device.clone()).unwrap(), 
-                frag: light_obj_frag::load(device.clone()).unwrap(),
+            unlit: ShaderModulePair { 
+                vert: unlit_vert::load(device.clone()).unwrap(), 
+                frag: unlit_frag::load(device.clone()).unwrap(),
             },
         }
     }

@@ -5,8 +5,10 @@ use vulkano::{buffer::{CpuAccessibleBuffer, BufferUsage}, memory::allocator::Mem
 use crate::{transform::Transform, UnconfiguredError};
 
 pub mod loader;
-use loader::ColorVertex;
-vulkano::impl_vertex!(ColorVertex, position, normal, color);
+use loader::BasicVertex;
+use loader::UnlitVertex;
+vulkano::impl_vertex!(BasicVertex, position, normal, color);
+vulkano::impl_vertex!(UnlitVertex, position, color);
 
 pub mod dummy;
 use dummy::DummyVertex;
@@ -15,18 +17,17 @@ vulkano::impl_vertex!(DummyVertex, position);
 
 /// Contains data that can only be generated after being configured with the Rhyolite instance
 struct ObjectPostConfig {
-    vertex_buffer: Arc<CpuAccessibleBuffer<[ColorVertex]>>,
-    // index buffer should go here
+    vertex_buffer: Arc<CpuAccessibleBuffer<[BasicVertex]>>,
 }
 pub struct Object {
-    vertices: Option<Vec<ColorVertex>>,
+    vertices: Option<Vec<BasicVertex>>,
     pub transform: Transform,
 
     post_config: Option<ObjectPostConfig>,
 }
 
 impl Object {
-    pub fn new(transform: Transform, vertices: Vec<ColorVertex>) -> Self {
+    pub fn new(transform: Transform, vertices: Vec<BasicVertex>) -> Self {
         Self {
             vertices: Some(vertices),
             transform,
@@ -53,7 +54,7 @@ impl Object {
         self.post_config.as_ref().ok_or(UnconfiguredError("Object not properly configured"))
     }
 
-    pub(crate) fn vertex_buffer(&self) -> Result<&Arc<CpuAccessibleBuffer<[ColorVertex]>>, UnconfiguredError> {
+    pub(crate) fn vertex_buffer(&self) -> Result<&Arc<CpuAccessibleBuffer<[BasicVertex]>>, UnconfiguredError> {
         Ok(&self.get_post_config()?.vertex_buffer)
     }
 }
