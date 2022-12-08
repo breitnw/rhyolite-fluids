@@ -24,6 +24,11 @@ struct CameraPostConfig {
 }
 
 impl Camera {
+    /// Creates a new camera with a specified transform, FOV, and clipping planes.
+    /// * `transform`: The transform to create the camera with, ignoring the scale field.
+    /// * `fovy`: The camera's vertical field of view.
+    /// * `near_clipping_plane`: The nearest distance at which geometry will clip out of view.
+    /// * `far_clipping_plane`: The farthest distance at which geometry will clip out of view.
     pub fn new(
         mut transform: Transform,
         fovy: f32, 
@@ -41,6 +46,7 @@ impl Camera {
         }
     }
 
+    /// Configures the camera's aspect ratio based on the window size. Needs to be run before the camera can be used.
     pub fn configure(&mut self, window: &Window) {
         let dimensions: [i32; 2] = window.inner_size().into();
         let aspect_ratio = dimensions[0] as f32 / dimensions[1] as f32;
@@ -93,10 +99,16 @@ impl Camera {
         ).unwrap())
     }
 
+    /// Gets a mutable reference to the camera's transform.
+    /// 
+    /// Calling this function forces the camera's descriptor sets to be updated at the end of the frame, so only use it when it's 
+    /// necessary to move the camera. 
     pub fn transform_mut(&mut self) -> &mut Transform {
         self.needs_update = true;
         &mut self.transform
     }
+
+    /// Gets an immutable reference to the camera's transform. 
     pub fn transform(&self) -> &Transform {
         &self.transform
     }

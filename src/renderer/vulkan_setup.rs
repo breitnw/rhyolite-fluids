@@ -16,8 +16,8 @@ use winit::window::Window;
 
 use std::sync::Arc;
 
-/// Selects the best physical device based on the available hardware
-pub fn select_physical_device(
+/// Selects the best physical device based on the available hardware.
+pub(crate) fn select_physical_device(
     instance: &Arc<Instance>,
     surface: &Arc<Surface>,
     device_extensions: &DeviceExtensions,
@@ -48,8 +48,8 @@ pub fn select_physical_device(
     (physical_device, queue_family as u32)
 }
 
-/// Sets up the framebuffers based on the size of the viewport
-pub fn window_size_dependent_setup(
+/// Sets up the framebuffers based on the size of the viewport.
+pub(crate) fn window_size_dependent_setup(
     allocator: &(impl MemoryAllocator + ?Sized),
     images: &[Arc<SwapchainImage>],
     render_pass: Arc<RenderPass>,
@@ -101,7 +101,7 @@ pub fn window_size_dependent_setup(
     (framebuffers, color_buffer.clone(), normal_buffer.clone())
 }
 
-pub fn get_instance() -> Arc<Instance> {
+pub(crate) fn get_instance() -> Arc<Instance> {
     let library = VulkanLibrary::new().unwrap();
     let required_extensions = vulkano_win::required_extensions(&*library);
     Instance::new(
@@ -116,7 +116,7 @@ pub fn get_instance() -> Arc<Instance> {
     .unwrap()
 }
 
-pub fn get_device(instance: &Arc<Instance>, surface: &Arc<Surface>) -> (Arc<PhysicalDevice>, Arc<Device>, impl ExactSizeIterator<Item = Arc<Queue>>) {
+pub(crate) fn get_device(instance: &Arc<Instance>, surface: &Arc<Surface>) -> (Arc<PhysicalDevice>, Arc<Device>, impl ExactSizeIterator<Item = Arc<Queue>>) {
     // Specify features for the physical device with the relevant extensions
     let device_ext = DeviceExtensions {
         khr_swapchain: true,
@@ -143,7 +143,7 @@ pub fn get_device(instance: &Arc<Instance>, surface: &Arc<Surface>) -> (Arc<Phys
     (physical_device, device, queues)
 }
 
-pub fn get_swapchain(
+pub(crate) fn get_swapchain(
     physical_device: &Arc<PhysicalDevice>, 
     device: &Arc<Device>, 
     surface: &Arc<Surface>, 
@@ -175,7 +175,7 @@ pub fn get_swapchain(
     .unwrap()
 }
 
-pub fn get_render_pass(device: &Arc<Device>, final_format: Format) -> Arc<RenderPass> {
+pub(crate) fn get_render_pass(device: &Arc<Device>, final_format: Format) -> Arc<RenderPass> {
     vulkano::ordered_passes_renderpass!(
         device.clone(),
         attachments: {
@@ -185,9 +185,9 @@ pub fn get_render_pass(device: &Arc<Device>, final_format: Format) -> Arc<Render
                 format: final_format,
                 samples: 1,
             },
-            color: {
+            albedo: {
                 load: Clear,
-                store: Store,
+                store: DontCare,
                 format: Format::A2B10G10R10_UNORM_PACK32,
                 samples: 1,
             },
@@ -195,6 +195,19 @@ pub fn get_render_pass(device: &Arc<Device>, final_format: Format) -> Arc<Render
                 load: Clear,
                 store: DontCare,
                 format: Format::R16G16B16A16_SFLOAT,
+                samples: 1,
+            },
+            frag_pos: {
+                load: Clear,
+                store: DontCare,
+                format: Format::R16G16B16A16_SFLOAT,
+                samples: 1,
+            },
+            // TODO: textures would typically be used for specular instead of renderpass attachments
+            specular: {
+                load: Clear,
+                store: DontCare,
+                format: Format::R16G16_SFLOAT,
                 samples: 1,
             },
             depth: {
@@ -206,14 +219,14 @@ pub fn get_render_pass(device: &Arc<Device>, final_format: Format) -> Arc<Render
         },
         passes: [
             {
-                color: [color, normals],
+                color: [albedo, normals, frag_pos, specular],
                 depth_stencil: {depth},
                 input: []
             },
             {
                 color: [final_color],
                 depth_stencil: {depth},
-                input: [color, normals]
+                input: [albedo, normals, frag_pos, specular]
             }
         ]
     )

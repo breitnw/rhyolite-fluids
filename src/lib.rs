@@ -19,18 +19,22 @@ mod renderer;
 // TODO: implement frames in flight if not implemented in the tutorial
 // TODO: replace PersistentDescriptorSet instances with a type expected to be shorter-lived
 
+/// The base struct of all Rhyolite operations. 
 pub struct Rhyolite {
     pub renderer: Renderer,
     event_loop: Option<EventLoop<()>>,
 }
 
 impl Rhyolite {
+    /// Creates a new Rhyolite instance with a specified Winit event loop. 
     pub fn new() -> Self {
         let event_loop = EventLoop::new();
         let renderer = Renderer::new(&event_loop);
         Rhyolite { renderer, event_loop: Some(event_loop) }
     }
 
+    /// Runs a FnMut closure with the Rhyolite instance. Events for program exiting, swapchain recreation on resize, and TimeState calculation are executed before
+    /// the closure is called. 
     pub fn run<F>(mut self, mut handler: F)
     where F: 'static + FnMut(Event<'_, ()>, &EventLoopWindowTarget<()>, &mut ControlFlow, &TimeState, &mut Renderer) {
         let mut time_state = TimeState::new();
@@ -59,6 +63,9 @@ impl std::fmt::Display for UnconfiguredError {
     }
 }
 
+/// A struct representing various time-related values, automatically calculated by Rhyolite before each frame.
+/// * `current`: The amount of time elapsed since the start of the program, in seconds.
+/// * `delta`: The amount of time elapsed since the last frame, in seconds. 
 pub struct TimeState {
     start_instant: Instant,
     pub current: f32,
@@ -69,13 +76,12 @@ impl TimeState {
         TimeState {
             start_instant: Instant::now(),
             current: 0.0,
-            delta: 0.001,
+            delta: 0.0,
         }
     }
     pub(crate) fn update(&mut self) {
         let new_time = self.start_instant.elapsed().as_secs_f32();
-        // Clamp delta time to 0.001 to prevent division by 0 errors at the beginning of the program
-        self.delta = (new_time - self.current).max(0.001);
+        self.delta = new_time - self.current;
         self.current = new_time
     }
 }

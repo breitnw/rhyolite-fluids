@@ -2,7 +2,7 @@ use bytemuck::{Zeroable, Pod};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
-pub struct DummyVertex {
+pub(crate) struct DummyVertex {
     pub position: [f32; 2]
 }
 
