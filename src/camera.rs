@@ -21,7 +21,7 @@ struct CameraPostConfig {
     aspect_ratio: f32,
     projection: TMat4<f32>,
     vp_subbuffer: Option<Arc<CpuBufferPoolSubbuffer<albedo_vert::ty::VP_Data>>>,
-}
+}// :)
 
 impl Camera {
     /// Creates a new camera with a specified transform, FOV, and clipping planes.

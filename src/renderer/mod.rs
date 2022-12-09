@@ -39,6 +39,8 @@ use winit::window::{Window, WindowBuilder};
 
 use std::sync::Arc;
 
+use self::vulkan_setup::AttachmentBuffers;
+
 mod vulkan_setup;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -78,8 +80,7 @@ pub struct Renderer {
     unlit_pipeline: Arc<GraphicsPipeline>,
 
     framebuffers: Vec<Arc<Framebuffer>>,
-    color_buffer: Arc<ImageView<AttachmentImage>>,
-    normal_buffer: Arc<ImageView<AttachmentImage>>,
+    attachment_buffers: AttachmentBuffers,
 
     dummy_vertices: Arc<CpuAccessibleBuffer<[DummyVertex]>>,
     viewport: Viewport,
@@ -209,8 +210,8 @@ impl Renderer {
             depth_range: 0.0..1.0,
         };
 
-        let (framebuffers, color_buffer, normal_buffer) = 
-            vulkan_setup::window_size_dependent_setup(&buffer_allocator, &images, render_pass.clone(), &mut viewport);
+        // Includes framebuffers and other attachments that aren't stored
+        let (framebuffers, attachment_buffers) = vulkan_setup::window_size_dependent_setup(&buffer_allocator, &images, render_pass.clone(), &mut viewport);
 
         // Create a dummy vertex buffer used for full-screen shaders
         let dummy_vertices = CpuAccessibleBuffer::from_iter(
@@ -256,8 +257,7 @@ impl Renderer {
             unlit_pipeline,
 
             framebuffers,
-            color_buffer,
-            normal_buffer,
+            attachment_buffers,
 
             dummy_vertices,
             vp_set: None,
@@ -286,8 +286,7 @@ impl Renderer {
 
         self.swapchain = new_swapchain;
         // TODO: use a different allocator?
-        (self.framebuffers, self.color_buffer, self.normal_buffer) = 
-            vulkan_setup::window_size_dependent_setup(&self.buffer_allocator, &new_images, self.render_pass.clone(), &mut self.viewport);
+        (self.framebuffers, self.attachment_buffers) = vulkan_setup::window_size_dependent_setup(&self.buffer_allocator, &new_images, self.render_pass.clone(), &mut self.viewport);
     }
 
     /// Updates the aspect ratio of the camera. Should be called when the window is resized
@@ -336,6 +335,8 @@ impl Renderer {
 
         // Set the clear values for each of the buffers
         let clear_values: Vec<Option<ClearValue>> = vec![
+            Some(ClearValue::Float([0.0, 0.0, 0.0, 1.0])),
+            Some(ClearValue::Float([0.0, 0.0, 0.0, 1.0])),
             Some(ClearValue::Float([0.0, 0.0, 0.0, 1.0])),
             Some(ClearValue::Float([0.0, 0.0, 0.0, 1.0])),
             Some(ClearValue::Float([0.0, 0.0, 0.0, 1.0])),
@@ -516,7 +517,7 @@ impl Renderer {
             &self.descriptor_set_allocator,
             ambient_layout.clone(),
             [
-                WriteDescriptorSet::image_view(0, self.color_buffer.clone()),
+                WriteDescriptorSet::image_view(0, self.attachment_buffers.albedo_buffer.clone()),
                 WriteDescriptorSet::buffer(1, self.ambient_buf.as_mut().unwrap().clone()),
             ],
         ).unwrap();
@@ -560,8 +561,8 @@ impl Renderer {
             &self.descriptor_set_allocator,
             directional_layout.clone(),
             [ 
-                WriteDescriptorSet::image_view(0, self.color_buffer.clone()),
-                WriteDescriptorSet::image_view(1, self.normal_buffer.clone()),
+                WriteDescriptorSet::image_view(0, self.attachment_buffers.albedo_buffer.clone()),
+                WriteDescriptorSet::image_view(1, self.attachment_buffers.normal_buffer.clone()),
                 WriteDescriptorSet::buffer(2, directional_subbuffer)
             ],
         ).unwrap();

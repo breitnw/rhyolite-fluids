@@ -48,24 +48,28 @@ pub(crate) fn select_physical_device(
     (physical_device, queue_family as u32)
 }
 
+
+pub(crate) struct AttachmentBuffers {
+    pub albedo_buffer: Arc<ImageView<AttachmentImage>>,
+    pub normal_buffer: Arc<ImageView<AttachmentImage>>,
+    pub frag_pos_buffer: Arc<ImageView<AttachmentImage>>,
+    pub specular_buffer: Arc<ImageView<AttachmentImage>>,
+}
+
 /// Sets up the framebuffers based on the size of the viewport.
 pub(crate) fn window_size_dependent_setup(
     allocator: &(impl MemoryAllocator + ?Sized),
     images: &[Arc<SwapchainImage>],
     render_pass: Arc<RenderPass>,
     viewport: &mut Viewport,
-) -> (
-    Vec<Arc<Framebuffer>>,
-    Arc<ImageView<AttachmentImage>>,
-    Arc<ImageView<AttachmentImage>>,
-) {
+) -> (Vec<Arc<Framebuffer>>, AttachmentBuffers) {
     let dimensions = images[0].dimensions().width_height();
     viewport.dimensions = [dimensions[0] as f32, dimensions[1] as f32];
 
     let depth_buffer = ImageView::new_default(
         AttachmentImage::transient(allocator, dimensions, Format::D16_UNORM).unwrap()
     ).unwrap();
-    let color_buffer = ImageView::new_default(
+    let albedo_buffer = ImageView::new_default(
         AttachmentImage::transient_input_attachment(
             allocator, 
             dimensions, 
@@ -79,6 +83,20 @@ pub(crate) fn window_size_dependent_setup(
             Format::R16G16B16A16_SFLOAT,
         ).unwrap()
     ).unwrap();
+    let frag_pos_buffer = ImageView::new_default(
+        AttachmentImage::transient_input_attachment(
+            allocator, 
+            dimensions, 
+            Format::R16G16B16A16_SFLOAT
+        ).unwrap()
+    ).unwrap();
+    let specular_buffer = ImageView::new_default(
+        AttachmentImage::transient_input_attachment(
+            allocator, 
+            dimensions, 
+            Format::R16G16_SFLOAT,
+        ).unwrap()
+    ).unwrap();
     
     let framebuffers = images
         .iter()
@@ -89,8 +107,10 @@ pub(crate) fn window_size_dependent_setup(
                 FramebufferCreateInfo {
                     attachments: vec![
                         view, 
-                        color_buffer.clone(),
+                        albedo_buffer.clone(),
                         normal_buffer.clone(),
+                        frag_pos_buffer.clone(),
+                        specular_buffer.clone(),
                         depth_buffer.clone()
                     ],
                     ..Default::default()
@@ -98,7 +118,13 @@ pub(crate) fn window_size_dependent_setup(
             ).unwrap()
         }).collect::<Vec<_>>();
 
-    (framebuffers, color_buffer.clone(), normal_buffer.clone())
+    let attachment_buffers = AttachmentBuffers {
+        albedo_buffer: albedo_buffer.clone(),
+        normal_buffer: normal_buffer.clone(),
+        frag_pos_buffer: frag_pos_buffer.clone(),
+        specular_buffer: specular_buffer.clone(),
+    };
+    (framebuffers, attachment_buffers)
 }
 
 pub(crate) fn get_instance() -> Arc<Instance> {
