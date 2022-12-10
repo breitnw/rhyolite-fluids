@@ -54,7 +54,7 @@ impl Object {
         self.post_config.as_ref().ok_or(UnconfiguredError("Object not properly configured"))
     }
 
-    pub(crate) fn vertex_buffer(&self) -> Result<&Arc<CpuAccessibleBuffer<[BasicVertex]>>, UnconfiguredError> {
+    pub(crate) fn get_vertex_buffer(&self) -> Result<&Arc<CpuAccessibleBuffer<[BasicVertex]>>, UnconfiguredError> {
         Ok(&self.get_post_config()?.vertex_buffer)
     }
 }

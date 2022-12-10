@@ -3,23 +3,25 @@ use std::sync::Arc;
 use nalgebra_glm::Vec3;
 use vulkano::buffer::{CpuBufferPool, cpu_pool::CpuBufferPoolSubbuffer};
 
-use crate::shaders::directional_frag;
+use crate::shaders::point_frag::ty::Point_Light_Data;
 
 #[derive(Default, Debug, Clone)]
 pub struct AmbientLight {
     pub color: [f32; 3],
     pub intensity: f32,
 }
-pub struct DirectionalLight {
+pub struct PointLight {
     position: Vec3,
+    intensity: f32,
     color: [f32; 3],
-    buffer: Option<Arc<CpuBufferPoolSubbuffer<directional_frag::ty::Directional_Light_Data>>>,
+    buffer: Option<Arc<CpuBufferPoolSubbuffer<Point_Light_Data>>>,
 }
 
-impl DirectionalLight {
-    pub fn new(position: Vec3, color: [f32; 3]) -> Self {
+impl PointLight {
+    pub fn new(position: Vec3, intensity: f32, color: [f32; 3]) -> Self {
         Self {
             position,
+            intensity,
             color, 
             buffer: None,
         }
@@ -35,14 +37,15 @@ impl DirectionalLight {
     }
     pub(crate) fn get_buffer(
         &mut self,
-        pool: &CpuBufferPool<directional_frag::ty::Directional_Light_Data>,
-    ) -> Arc<CpuBufferPoolSubbuffer<directional_frag::ty::Directional_Light_Data>> {
+        pool: &CpuBufferPool<Point_Light_Data>,
+    ) -> Arc<CpuBufferPoolSubbuffer<Point_Light_Data>> {
         let position_arr = [self.position.x, self.position.y, self.position.z, 0.0];
         if let Some(buffer) = self.buffer.as_ref() {
             return buffer.clone();
         } else {
-            let uniform_data = directional_frag::ty::Directional_Light_Data {
+            let uniform_data = Point_Light_Data {
                 position: position_arr.into(),
+                intensity: self.intensity,
                 color: self.color.into(),
             };
             let buffer = pool.from_data(uniform_data).unwrap();

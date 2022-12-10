@@ -17,20 +17,24 @@ pub mod albedo_frag {
     vulkano_shaders::shader!{
         ty: "fragment",
         path: "src/shaders/albedo.frag",
+        types_meta: {
+            use bytemuck::{Pod, Zeroable};
+            #[derive(Clone, Copy, Zeroable, Pod)]
+        },
     }
 }
 
-pub mod directional_vert {
+pub mod point_vert {
     vulkano_shaders::shader!{
         ty: "vertex",
-        path: "src/shaders/lighting/directional.vert",
+        path: "src/shaders/lighting/point.vert",
     }
 }
 
-pub mod directional_frag {
+pub mod point_frag {
     vulkano_shaders::shader!{
         ty: "fragment",
-        path: "src/shaders/lighting/directional.frag",
+        path: "src/shaders/lighting/point.frag",
         types_meta: {
             use bytemuck::{Pod, Zeroable};
             #[derive(Clone, Copy, Zeroable, Pod)]
@@ -82,7 +86,7 @@ pub struct ShaderModulePair {
 }
 pub struct Shaders {
     pub albedo: ShaderModulePair,
-    pub directional: ShaderModulePair,
+    pub point: ShaderModulePair,
     pub ambient: ShaderModulePair,
     pub unlit: ShaderModulePair
 }
@@ -93,9 +97,9 @@ impl Shaders {
                 vert: albedo_vert::load(device.clone()).unwrap(), 
                 frag: albedo_frag::load(device.clone()).unwrap(),
             },
-            directional: ShaderModulePair { 
-                vert: directional_vert::load(device.clone()).unwrap(), 
-                frag: directional_frag::load(device.clone()).unwrap(),
+            point: ShaderModulePair { 
+                vert: point_vert::load(device.clone()).unwrap(), 
+                frag: point_frag::load(device.clone()).unwrap(),
             },
             ambient: ShaderModulePair { 
                 vert: ambient_vert::load(device.clone()).unwrap(), 

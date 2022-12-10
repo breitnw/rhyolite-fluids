@@ -2,8 +2,8 @@ use crate::UnconfiguredError;
 use crate::geometry::Object;
 use crate::geometry::dummy::DummyVertex;
 use crate::geometry::loader::BasicVertex;
-use crate::shaders::{albedo_vert, directional_frag, ambient_frag, Shaders, unlit_vert};
-use crate::lighting::{AmbientLight, DirectionalLight};
+use crate::shaders::{albedo_vert, point_frag, ambient_frag, Shaders, unlit_vert, albedo_frag};
+use crate::lighting::{AmbientLight, PointLight};
 use crate::camera::Camera;
 
 use vulkano;
@@ -13,8 +13,6 @@ use vulkano::command_buffer::allocator::{StandardCommandBufferAllocator, Standar
 use vulkano::descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet};
 use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
 use vulkano::device::{Device, Queue};
-use vulkano::image::AttachmentImage;
-use vulkano::image::view::ImageView;
 use vulkano::instance::{Instance};
 use vulkano::memory::allocator::{GenericMemoryAllocator, FreeListAllocator};
 use vulkano::pipeline::graphics::color_blend::{ColorBlendState, BlendFactor, AttachmentBlend, BlendOp};
@@ -49,7 +47,7 @@ enum RenderStage {
     Stopped,
     Albedo,
     Ambient,
-    Directional,
+    Point,
     Unlit,
     Error,
 }
@@ -68,15 +66,16 @@ pub struct Renderer {
     descriptor_set_allocator: StandardDescriptorSetAllocator,
     command_buffer_allocator: StandardCommandBufferAllocator,
 
-    ambient_buf: Option<Arc<CpuAccessibleBuffer<ambient_frag::ty::Ambient_Light_Data>>>,
-    directional_buf_pool: CpuBufferPool<directional_frag::ty::Directional_Light_Data>,
+    ambient_light_buf: Option<Arc<CpuAccessibleBuffer<ambient_frag::ty::Ambient_Light_Data>>>,
+    point_light_buf_pool: CpuBufferPool<point_frag::ty::Point_Light_Data>,
     albedo_buf_pool: CpuBufferPool<albedo_vert::ty::Model_Data>,
     unlit_buf_pool: CpuBufferPool<unlit_vert::ty::Model_Data>,
     vp_buf_pool: CpuBufferPool<albedo_vert::ty::VP_Data>,
+    camera_pos_buf_pool: CpuBufferPool<point_frag::ty::Camera_Data>,
 
     albedo_pipeline: Arc<GraphicsPipeline>,
-    directional_pipeline: Arc<GraphicsPipeline>,
-    ambient_pipeline: Arc<GraphicsPipeline>,
+    point_light_pipeline: Arc<GraphicsPipeline>,
+    ambient_light_pipeline: Arc<GraphicsPipeline>,
     unlit_pipeline: Arc<GraphicsPipeline>,
 
     framebuffers: Vec<Arc<Framebuffer>>,
@@ -136,12 +135,12 @@ impl Renderer {
             .build(device.clone())
             .unwrap();
 
-        let directional_pipeline = GraphicsPipeline::start()
+        let point_light_pipeline = GraphicsPipeline::start()
             .vertex_input_state(BuffersDefinition::new().vertex::<DummyVertex>())
-            .vertex_shader(shaders.directional.vert.entry_point("main").unwrap(), ())
+            .vertex_shader(shaders.point.vert.entry_point("main").unwrap(), ())
             .input_assembly_state(InputAssemblyState::new())
             .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
-            .fragment_shader(shaders.directional.frag.entry_point("main").unwrap(), ())
+            .fragment_shader(shaders.point.frag.entry_point("main").unwrap(), ())
             .color_blend_state(ColorBlendState::new(lighting_pass.num_color_attachments()).blend(
                 AttachmentBlend {
                     color_op: BlendOp::Add,
@@ -199,10 +198,11 @@ impl Renderer {
 
         // Buffers and buffer pools
         let ambient_buf = None;
-        let directional_buf_pool = CpuBufferPool::<directional_frag::ty::Directional_Light_Data>::uniform_buffer(buffer_allocator.clone());
+        let point_light_buf_pool = CpuBufferPool::<point_frag::ty::Point_Light_Data>::uniform_buffer(buffer_allocator.clone());
         let albedo_buf_pool = CpuBufferPool::<albedo_vert::ty::Model_Data>::uniform_buffer(buffer_allocator.clone());
         let unlit_buf_pool = CpuBufferPool::<unlit_vert::ty::Model_Data>::uniform_buffer(buffer_allocator.clone());
         let vp_buf_pool = CpuBufferPool::<albedo_vert::ty::VP_Data>::uniform_buffer(buffer_allocator.clone());
+        let camera_pos_buf_pool = CpuBufferPool::<point_frag::ty::Camera_Data>::uniform_buffer(buffer_allocator.clone());
 
         let mut viewport = Viewport {
             origin: [0.0, 0.0],
@@ -245,14 +245,15 @@ impl Renderer {
             descriptor_set_allocator,
             command_buffer_allocator,
 
-            ambient_buf,
-            directional_buf_pool,
+            ambient_light_buf: ambient_buf,
+            point_light_buf_pool,
             albedo_buf_pool,
             unlit_buf_pool,
             vp_buf_pool,
+            camera_pos_buf_pool,
 
-            ambient_pipeline,
-            directional_pipeline,
+            ambient_light_pipeline: ambient_pipeline,
+            point_light_pipeline,
             albedo_pipeline,
             unlit_pipeline,
 
@@ -305,7 +306,14 @@ impl Renderer {
             camera.configure(&self.window);
         }
         let vp_layout = self.albedo_pipeline.layout().set_layouts().get(0).unwrap().clone();
-        self.vp_set = Some(camera.get_vp_descriptor_set(&self.descriptor_set_allocator, &vp_layout, &self.vp_buf_pool).unwrap());
+        let vp_subbuffer = camera.get_vp_subbuffer(&self.vp_buf_pool).unwrap();
+        self.vp_set = Some(PersistentDescriptorSet::new(
+            &self.descriptor_set_allocator,
+            vp_layout,
+            [
+                WriteDescriptorSet::buffer(0, vp_subbuffer),
+            ]
+        ).unwrap());
 
         self.previous_frame_end.as_mut()
             .expect("previous_frame_end future is null. Did you remember to finish the previous frame?")
@@ -368,10 +376,10 @@ impl Renderer {
 
     /// Finishes the rendering process and draws to the screen
     /// # Panics
-    /// Panics if not called after a `draw_object_unlit()` call or a `draw_directional()` call
+    /// Panics if not called after a `draw_object_unlit()` call or a `draw_point()` call
     pub fn finish(&mut self) {
         match self.render_stage {
-            RenderStage::Directional => {},
+            RenderStage::Point => {},
             RenderStage::Unlit => {},
             RenderStage::Error => {
                 self.commands = None;
@@ -427,16 +435,15 @@ impl Renderer {
 
     /// Draws an object that will later be lit
     /// # Panics
-    /// Panics if not called after a `start()` call or another `draw_object_albedo()` call
-    pub fn draw_object_albedo(&mut self, object: &mut Object) -> Result<(), UnconfiguredError> {
+    /// Panics if not called after a `start()` call or another `draw_object()` call
+    pub fn draw_object(&mut self, object: &mut Object) -> Result<(), UnconfiguredError> {
         match self.render_stage {
             RenderStage::Albedo => {},
             RenderStage::Error => {
                 self.commands = None;
-                // TODO: err here instead of returning Ok
                 return Ok(());
             },
-            _ => panic!("draw_object_albedo() not called in order, rendering stopped")
+            _ => panic!("draw_object() not called in order, rendering stopped")
         }
 
         let albedo_subbuffer = {
@@ -447,12 +454,29 @@ impl Renderer {
             };
             self.albedo_buf_pool.from_data(uniform_data).unwrap()
         };
+        
+        // TODO: Do this with textures instead!!!!!!!!! Not a CpuAccessibleBuffer!!!!!!!!!
+        // or at least store the buffer instead of recreating it every frame.....
+        let specular_buffer = CpuAccessibleBuffer::from_data(
+            &self.buffer_allocator, 
+            BufferUsage {
+                uniform_buffer: true,
+                ..Default::default()
+            }, 
+            false, 
+            albedo_frag::ty::Specular_Data {
+                intensity: 0.3,
+                shininess: 4.0,
+            },
+        ).unwrap();
+
         let albedo_layout = self.albedo_pipeline.layout().set_layouts().get(1).unwrap().clone();
         let albedo_set = PersistentDescriptorSet::new(
             &self.descriptor_set_allocator,
             albedo_layout.clone(),
             [
-                WriteDescriptorSet::buffer(0, albedo_subbuffer)
+                WriteDescriptorSet::buffer(0, albedo_subbuffer),
+                WriteDescriptorSet::buffer(1, specular_buffer),
             ]
         ).unwrap();
 
@@ -467,8 +491,8 @@ impl Renderer {
                 (self.vp_set.as_ref().unwrap().clone(), albedo_set.clone())
             )
             // TODO: possible to bind multiple vertex buffers at once?
-            .bind_vertex_buffers(0, object.vertex_buffer()?.clone())
-            .draw(object.vertex_buffer()?.len() as u32, 1, 0, 0)
+            .bind_vertex_buffers(0, object.get_vertex_buffer()?.clone())
+            .draw(object.get_vertex_buffer()?.len() as u32, 1, 0, 0)
             .unwrap();
         
         Ok(())
@@ -476,7 +500,7 @@ impl Renderer {
     
     /// Sets the ambient light to use for rendering
     pub fn set_ambient(&mut self, light: AmbientLight) {
-        self.ambient_buf = Some(CpuAccessibleBuffer::from_data(
+        self.ambient_light_buf = Some(CpuAccessibleBuffer::from_data(
             &self.buffer_allocator, 
             BufferUsage {
                 uniform_buffer: true,
@@ -492,8 +516,8 @@ impl Renderer {
 
     /// Draws an ambient light, which adds global illumination to the entire scene
     /// # Panics
-    /// Panics if not called after a `draw_object_albedo()` call
-    pub fn draw_ambient(&mut self) {
+    /// Panics if not called after a `draw_object()` call
+    pub fn draw_ambient_light(&mut self) {
         match self.render_stage {
             RenderStage::Albedo => {
                 self.render_stage = RenderStage::Ambient;
@@ -505,20 +529,20 @@ impl Renderer {
             _ => panic!("draw_ambient() not called in order, rendering stopped")
         }
 
-        if self.ambient_buf.is_none() { 
+        if self.ambient_light_buf.is_none() { 
             self.commands.as_mut().unwrap()
                 .next_subpass(SubpassContents::Inline)
                 .unwrap();
             return; 
         }
 
-        let ambient_layout = self.ambient_pipeline.layout().set_layouts().get(0).unwrap();
+        let ambient_layout = self.ambient_light_pipeline.layout().set_layouts().get(0).unwrap();
         let ambient_set = PersistentDescriptorSet::new(
             &self.descriptor_set_allocator,
             ambient_layout.clone(),
             [
                 WriteDescriptorSet::image_view(0, self.attachment_buffers.albedo_buffer.clone()),
-                WriteDescriptorSet::buffer(1, self.ambient_buf.as_mut().unwrap().clone()),
+                WriteDescriptorSet::buffer(1, self.ambient_light_buf.as_mut().unwrap().clone()),
             ],
         ).unwrap();
 
@@ -527,10 +551,10 @@ impl Renderer {
             .next_subpass(SubpassContents::Inline)
             .unwrap()
             .set_viewport(0, [self.viewport.clone()])
-            .bind_pipeline_graphics(self.ambient_pipeline.clone())
+            .bind_pipeline_graphics(self.ambient_light_pipeline.clone())
             .bind_descriptor_sets(
                 PipelineBindPoint::Graphics, 
-                self.ambient_pipeline.layout().clone(), 
+                self.ambient_light_pipeline.layout().clone(), 
                 0,
                 ambient_set.clone(),
             )
@@ -539,40 +563,46 @@ impl Renderer {
             .unwrap();
     }
 
-    /// Draws a directional light with a specified color and position
+    /// Draws a point light with a specified color and position
     /// # Panics
-    /// Panics if not called after a `draw_ambient()` call or `another draw_directional()` call
-    pub fn draw_directional(&mut self, directional_light: &mut DirectionalLight) {
+    /// Panics if not called after a `draw_ambient()` call or `another draw_point()` call
+    pub fn draw_point_light(&mut self, camera: &mut Camera, point_light: &mut PointLight) {
         match self.render_stage {
             RenderStage::Ambient => {
-                self.render_stage = RenderStage::Directional;
+                self.render_stage = RenderStage::Point;
             }
-            RenderStage::Directional => {}
+            RenderStage::Point => {}
             RenderStage::Error => {
                 self.commands = None;
                 return;
             }
-            _ => panic!("draw_directional() not called in order, rendering stopped")
+            _ => panic!("draw_point() not called in order, rendering stopped")
         }
 
-        let directional_subbuffer = directional_light.get_buffer(&self.directional_buf_pool);
-        let directional_layout = self.directional_pipeline.layout().set_layouts().get(0).unwrap().clone();
-        let directional_set = PersistentDescriptorSet::new(
+        let point_subbuffer = point_light.get_buffer(&self.point_light_buf_pool);
+        let camera_pos_subbuffer = camera.get_pos_subbuffer(&self.camera_pos_buf_pool).unwrap();
+
+        let point_layout = self.point_light_pipeline.layout().set_layouts().get(0).unwrap().clone();
+        let point_set = PersistentDescriptorSet::new(
             &self.descriptor_set_allocator,
-            directional_layout.clone(),
+            point_layout.clone(),
             [ 
                 WriteDescriptorSet::image_view(0, self.attachment_buffers.albedo_buffer.clone()),
                 WriteDescriptorSet::image_view(1, self.attachment_buffers.normal_buffer.clone()),
-                WriteDescriptorSet::buffer(2, directional_subbuffer)
+                WriteDescriptorSet::image_view(2, self.attachment_buffers.frag_pos_buffer.clone()),
+                WriteDescriptorSet::image_view(3, self.attachment_buffers.specular_buffer.clone()),
+                WriteDescriptorSet::buffer(4, point_subbuffer),
+                WriteDescriptorSet::buffer(5, camera_pos_subbuffer),
             ],
         ).unwrap();
+
         self.commands.as_mut().unwrap()
-            .bind_pipeline_graphics(self.directional_pipeline.clone())
+            .bind_pipeline_graphics(self.point_light_pipeline.clone())
             .bind_descriptor_sets(
                 PipelineBindPoint::Graphics,
-                self.directional_pipeline.layout().clone(),
+                self.point_light_pipeline.layout().clone(),
                 0,
-                directional_set.clone(),
+                point_set,
             )
             .bind_vertex_buffers(0, self.dummy_vertices.clone())
             .draw(self.dummy_vertices.len() as u32, 1, 0, 0)
@@ -581,10 +611,10 @@ impl Renderer {
 
     /// Draws an object with an unlit shader by rendering it after shadows are drawn
     /// # Panics
-    /// Panics if not called after a `draw_directional()` call or another `draw_object_unlit()` call
+    /// Panics if not called after a `draw_point()` call or another `draw_object_unlit()` call
     pub fn draw_object_unlit(&mut self, object: &mut Object) -> Result<(), UnconfiguredError> {
         match self.render_stage {
-            RenderStage::Directional => {
+            RenderStage::Point => {
                 self.render_stage = RenderStage::Unlit;
             }
             RenderStage::Unlit => {},
@@ -592,7 +622,7 @@ impl Renderer {
                 self.commands = None;
                 return Ok(());
             }
-            _ => panic!("draw_directional() not called in order, rendering stopped")
+            _ => panic!("draw_point() not called in order, rendering stopped")
         }
 
         let unlit_subbuffer = {
@@ -622,8 +652,8 @@ impl Renderer {
                 (self.vp_set.as_ref().unwrap().clone(), unlit_set.clone())
             )
             // TODO: possible to bind multiple vertex buffers at once?
-            .bind_vertex_buffers(0, object.vertex_buffer()?.clone())
-            .draw(object.vertex_buffer()?.len() as u32, 1, 0, 0)
+            .bind_vertex_buffers(0, object.get_vertex_buffer()?.clone())
+            .draw(object.get_vertex_buffer()?.len() as u32, 1, 0, 0)
             .unwrap();
         Ok(())
 

@@ -16,11 +16,12 @@ layout(set = 1, binding = 0) uniform Model_Data {
 
 layout(location = 0) out vec3 out_color;
 layout(location = 1) out vec3 out_normal;
+layout(location = 2) out vec4 out_pos;
 
 void main() {
-    vec4 position = vp_uniforms.projection * vp_uniforms.view * model_uniforms.model * vec4(position, 1.0);
-    // position.y *= -1;
-    gl_Position = position;
+    vec4 frag_pos = vp_uniforms.projection * vp_uniforms.view * model_uniforms.model * vec4(position, 1.0);
+    gl_Position = frag_pos;
     out_color = color;
     out_normal = mat3(model_uniforms.normals) * normal;
+    out_pos = model_uniforms.model * vec4(position, 1.0);
 }
