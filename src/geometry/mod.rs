@@ -22,16 +22,20 @@ struct ObjectPostConfig {
 pub struct Object {
     vertices: Option<Vec<BasicVertex>>,
     pub transform: Transform,
+    specular_intensity: f32,
+    shininess: f32,
 
     post_config: Option<ObjectPostConfig>,
 }
 
 impl Object {
-    pub fn new(transform: Transform, vertices: Vec<BasicVertex>) -> Self {
+    pub fn new(transform: Transform, vertices: Vec<BasicVertex>, specular_intensity: f32, shininess: f32) -> Self {
         Self {
             vertices: Some(vertices),
             transform,
             post_config: None,
+            specular_intensity,
+            shininess,
         }
     }
 
@@ -56,5 +60,9 @@ impl Object {
 
     pub(crate) fn get_vertex_buffer(&self) -> Result<&Arc<CpuAccessibleBuffer<[BasicVertex]>>, UnconfiguredError> {
         Ok(&self.get_post_config()?.vertex_buffer)
+    }
+
+    pub(crate) fn get_specular(&self) -> (f32, f32) {
+        (self.specular_intensity, self.shininess)
     }
 }

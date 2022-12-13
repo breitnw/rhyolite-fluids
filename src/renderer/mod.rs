@@ -457,6 +457,7 @@ impl Renderer {
         
         // TODO: Do this with textures instead!!!!!!!!! Not a CpuAccessibleBuffer!!!!!!!!!
         // or at least store the buffer instead of recreating it every frame.....
+        let (intensity, shininess) = object.get_specular();
         let specular_buffer = CpuAccessibleBuffer::from_data(
             &self.buffer_allocator, 
             BufferUsage {
@@ -465,8 +466,8 @@ impl Renderer {
             }, 
             false, 
             albedo_frag::ty::Specular_Data {
-                intensity: 0.3,
-                shininess: 4.0,
+                intensity,
+                shininess,
             },
         ).unwrap();
 
