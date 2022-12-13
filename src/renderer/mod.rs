@@ -41,8 +41,9 @@ use self::vulkan_setup::AttachmentBuffers;
 
 mod vulkan_setup;
 
-#[derive(Debug, Clone, PartialEq)]
+const MAX_FRAMES_IN_FLIGHT: u32 = 2;
 
+#[derive(Debug, Clone, PartialEq)]
 enum RenderStage {
     Stopped,
     Albedo,
@@ -113,6 +114,7 @@ impl Renderer {
         // Create the swapchain, an object which contains a vector of Images used for rendering and information on 
         // how to show them to the user
         let (swapchain, images) = vulkan_setup::get_swapchain(&physical_device, &device, &surface, &window);
+        println!("{} images in the swapchain", images.len());
 
         let shaders = Shaders::default(&device);
 
