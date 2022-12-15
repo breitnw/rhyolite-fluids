@@ -26,7 +26,7 @@ use vulkano::render_pass::{Subpass, RenderPass, Framebuffer};
 use vulkano::swapchain::{
     self, AcquireError, SwapchainCreateInfo, SwapchainCreationError, SwapchainPresentInfo, Surface, Swapchain, SwapchainAcquireFuture,
 };
-use vulkano::sync::{self, FlushError, GpuFuture};
+use vulkano::sync::{self, FlushError, GpuFuture, FenceSignalFuture};
 use vulkano::format::ClearValue;
 
 use vulkano_win::VkSurfaceBuild;
@@ -41,7 +41,7 @@ use self::vulkan_setup::AttachmentBuffers;
 
 mod vulkan_setup;
 
-const MAX_FRAMES_IN_FLIGHT: u32 = 2;
+const MAX_FRAMES_IN_FLIGHT: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq)]
 enum RenderStage {
@@ -84,15 +84,17 @@ pub struct Renderer {
 
     dummy_vertices: Arc<CpuAccessibleBuffer<[DummyVertex]>>,
     viewport: Viewport,
-    previous_frame_end: Option<Box<dyn GpuFuture>>,
     vp_set: Option<Arc<PersistentDescriptorSet>>,
 
     commands: Option<AutoCommandBufferBuilder<PrimaryAutoCommandBuffer<StandardCommandBufferAlloc>, StandardCommandBufferAllocator>>,
-    image_idx: u32,
+    image_idx: usize,
     acquire_future: Option<SwapchainAcquireFuture>,
 
     render_stage: RenderStage,
     should_recreate_swapchain: bool,
+
+    fences: Vec<Option<FenceSignalFuture<Box<dyn GpuFuture>>>>,
+    previous_fence_idx: usize,
 }
 
 impl Renderer {
@@ -226,13 +228,14 @@ impl Renderer {
             DummyVertex::list().into_iter(),
         ).unwrap();
 
-        let previous_frame_end = Some(Box::new(sync::now(device.clone())) as Box<dyn GpuFuture>);
-
         let commands = None;
         let image_idx = 0;
         let acquire_future = None;
 
         let render_stage = RenderStage::Stopped;
+
+        let fences = (0..MAX_FRAMES_IN_FLIGHT).map(|_| None).collect();
+        let previous_fence_idx = 0;
 
         Renderer{ 
             instance, 
@@ -265,7 +268,6 @@ impl Renderer {
             dummy_vertices,
             vp_set: None,
             viewport,
-            previous_frame_end,
 
             commands, 
             image_idx,
@@ -273,6 +275,9 @@ impl Renderer {
 
             render_stage,
             should_recreate_swapchain: false,
+
+            fences,
+            previous_fence_idx,
         } 
     }
 
@@ -317,10 +322,6 @@ impl Renderer {
             ]
         ).unwrap());
 
-        self.previous_frame_end.as_mut()
-            .expect("previous_frame_end future is null. Did you remember to finish the previous frame?")
-            .cleanup_finished();
-
         if self.should_recreate_swapchain { 
             self.recreate_swapchain(); 
             self.update_aspect_ratio(camera);
@@ -336,6 +337,11 @@ impl Renderer {
             },
             Err(e) => panic!("Failed to acquire next image: {:?}", e)
         };
+        let image_idx = image_idx as usize;
+
+        if let Some(image_fence) = &self.fences[image_idx] {
+            image_fence.wait(None).unwrap();
+        }
 
         if suboptimal {
             // self.should_recreate_swapchain = true;
@@ -364,7 +370,7 @@ impl Renderer {
             .begin_render_pass(
                 RenderPassBeginInfo { 
                     clear_values,
-                    ..RenderPassBeginInfo::framebuffer(self.framebuffers[image_idx as usize].clone())
+                    ..RenderPassBeginInfo::framebuffer(self.framebuffers[image_idx].clone())
                 },
                 SubpassContents::Inline,
             )
@@ -395,36 +401,40 @@ impl Renderer {
         command_buffer_builder.end_render_pass().unwrap();
         let command_buffer = command_buffer_builder.build().unwrap();
 
-        let af = self.acquire_future.take().unwrap();
-        let fe = self.previous_frame_end.take().unwrap();
+        let acquire_future = self.acquire_future.take().unwrap();
+        let mut previous_frame_end = match self.fences[self.previous_fence_idx].take() {
+            None => sync::now(self.device.clone()).boxed(),
+            Some(fence) => fence.boxed(),
+        };
+        previous_frame_end.cleanup_finished();
 
-        let future = fe.join(af)
+        let future = previous_frame_end.join(acquire_future)
             .then_execute(self.queue.clone(), command_buffer).unwrap()
             .then_swapchain_present(self.queue.clone(), SwapchainPresentInfo::swapchain_image_index(
                 self.swapchain.clone(), 
-                self.image_idx
+                self.image_idx as u32
             ))
+            .boxed()
             .then_signal_fence_and_flush();
         
-        match future {
+        self.fences[self.image_idx] = match future {
             Ok(future) => {
-                self.previous_frame_end = Some(Box::new(future))
+                Some(future)
             }
             Err(FlushError::OutOfDate) => {
                 self.render_stage = RenderStage::Error;
-                self.previous_frame_end = Some(Box::new(sync::now(self.device.clone())));
-                return;
+                None
             }
             Err(e) => {
                 println!("Failed to flush future: {:?}", e);
                 self.render_stage = RenderStage::Error;
-                self.previous_frame_end = Some(Box::new(sync::now(self.device.clone())));
-                return;
+                None
             }
-        }
+        };
 
         self.commands = None;
         self.render_stage = RenderStage::Stopped;
+        self.previous_fence_idx = self.image_idx;
 
         // TODO: In complicated programs it’s likely that one or more of the operations we’ve just scheduled 
         // will block. This happens when the graphics hardware can not accept further commands and the program 
