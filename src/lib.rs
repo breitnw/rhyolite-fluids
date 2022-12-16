@@ -51,6 +51,7 @@ impl Rhyolite {
                 _ => (),
             }
             handler(event, target, control_flow, &time_state, &mut self.renderer);
+            // TODO: REQUEST REDRAW
         });
     }
 }
