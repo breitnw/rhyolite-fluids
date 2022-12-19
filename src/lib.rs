@@ -39,19 +39,26 @@ impl Rhyolite {
     where F: 'static + FnMut(Event<'_, ()>, &EventLoopWindowTarget<()>, &mut ControlFlow, &TimeState, &mut Renderer) {
         let mut time_state = TimeState::new();
 
+        self.renderer.window.request_redraw();
+        let mut redraw = false;
+
         self.event_loop.take().unwrap().run(move |event, target, control_flow| {
             match event {
                 Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
                     *control_flow = ControlFlow::Exit;
-                }
+                },
                 Event::WindowEvent { event: WindowEvent::Resized(_), .. } => {
                     self.renderer.recreate_swapchain();
                 },
+                Event::RedrawRequested { .. } => redraw = true,
                 Event::RedrawEventsCleared => time_state.update(),
-                _ => (),
+                _ => {
+                    if redraw { 
+                        self.renderer.window.request_redraw();
+                    }
+                },
             }
             handler(event, target, control_flow, &time_state, &mut self.renderer);
-            // TODO: REQUEST REDRAW
         });
     }
 }

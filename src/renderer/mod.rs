@@ -41,7 +41,7 @@ use self::vulkan_setup::AttachmentBuffers;
 
 mod vulkan_setup;
 
-const MAX_FRAMES_IN_FLIGHT: u32 = 3;
+const MAX_FRAMES_IN_FLIGHT: u32 = 8;
 
 #[derive(Debug, Clone, PartialEq)]
 enum RenderStage {
@@ -57,7 +57,7 @@ enum RenderStage {
 pub struct Renderer {
     instance: Arc<Instance>,
     surface: Arc<Surface>,
-    window: Arc<Window>,
+    pub window: Arc<Window>,
     device: Arc<Device>,
     queue: Arc<Queue>,
     swapchain: Arc<Swapchain>,
