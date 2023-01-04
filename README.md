@@ -8,6 +8,6 @@ brightness parameters.
 
 The base code here is heavily based on [Taidaesal's Vulkano tutorial](https://github.com/taidaesal/vulkano_tutorial), which, in turn, is based on the 
 official Vulkano examples. It's adapted to be more extensible and user-friendly than the code in the tutorial, with Phong-shaded point lights,
-more abstraction for `Camera`s and `Renderer`s, numerous performance optimizations, and (a lot of) refactoring for better readability and usability. 
+more abstraction for `Camera`s and `Renderer`s, performance optimizations, and (a lot of) refactoring for better readability and usability. 
 
 All code used from outside sources has been provided under the [MIT License](https://opensource.org/licenses/MIT).
