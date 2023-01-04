@@ -7,7 +7,8 @@ while lit models are shaded with Phong shading. To light models, Rhyolite offers
 brightness parameters.
 
 Here's an example of Rhyolite in action:
-![rhyolite](https://user-images.githubusercontent.com/29758429/210491134-02861d8e-baa8-4556-aa7f-cb74b0be866e.gif)
+
+![rhyolite](https://user-images.githubusercontent.com/29758429/210491738-b8defba2-e8f9-419f-a428-a89a1e326a55.gif)
 
 The base code here is heavily based on [Taidaesal's Vulkano tutorial](https://github.com/taidaesal/vulkano_tutorial), which, in turn, is based on the 
 official Vulkano examples. It's adapted to be more extensible and user-friendly than the code in the tutorial, with Phong-shaded point lights,
