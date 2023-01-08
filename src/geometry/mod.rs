@@ -19,7 +19,7 @@ vulkano::impl_vertex!(DummyVertex, position);
 struct ObjectPostConfig {
     vertex_buffer: Arc<CpuAccessibleBuffer<[BasicVertex]>>,
 }
-pub struct Object {
+pub struct MeshObject {
     vertices: Option<Vec<BasicVertex>>,
     pub transform: Transform,
     specular_intensity: f32,
@@ -28,7 +28,7 @@ pub struct Object {
     post_config: Option<ObjectPostConfig>,
 }
 
-impl Object {
+impl MeshObject {
     pub fn new(transform: Transform, vertices: Vec<BasicVertex>, specular_intensity: f32, shininess: f32) -> Self {
         Self {
             vertices: Some(vertices),
@@ -65,4 +65,8 @@ impl Object {
     pub(crate) fn get_specular(&self) -> (f32, f32) {
         (self.specular_intensity, self.shininess)
     }
+}
+
+pub struct MarchedObject {
+    // TODO: implement, move to another file
 }
