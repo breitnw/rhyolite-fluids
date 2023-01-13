@@ -10,7 +10,7 @@ Here's an example of Rhyolite in action:
 
 ![rhyolite](https://user-images.githubusercontent.com/29758429/210491738-b8defba2-e8f9-419f-a428-a89a1e326a55.gif)
 
-The base code here is heavily based on [Taidaesal's Vulkano tutorial](https://github.com/taidaesal/vulkano_tutorial), which, in turn, is based on the 
+The base code here is partially based on [Taidaesal's Vulkano tutorial](https://github.com/taidaesal/vulkano_tutorial), which, in turn, is based on the 
 official Vulkano examples. It's adapted to be more extensible and user-friendly than the code in the tutorial, with Phong-shaded point lights,
 more abstraction for `Camera`s and `Renderer`s, performance optimizations, and (a lot of) refactoring for better readability and usability. 
 
