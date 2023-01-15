@@ -11,7 +11,6 @@ use vulkano::buffer::{CpuBufferPool, TypedBufferAccess, CpuAccessibleBuffer, Buf
 use vulkano::command_buffer::SubpassContents;
 use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
 use vulkano::descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet};
-use vulkano::device::Device;
 use vulkano::image::{AttachmentImage, SwapchainImage, ImageAccess};
 use vulkano::image::view::ImageView;
 use vulkano::memory::allocator::{GenericMemoryAllocator, FreeListAllocator, MemoryAllocator};

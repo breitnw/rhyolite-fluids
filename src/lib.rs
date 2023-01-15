@@ -2,9 +2,9 @@
 
 
 
-use std::{time::Instant, fs::ReadDir};
+use std::time::Instant;
 
-use renderer::{Renderer, marched::MarchedRenderer, mesh::MeshRenderer, RenderBase};
+use renderer::{Renderer, marched::MarchedRenderer, mesh::MeshRenderer};
 use winit::{event_loop::{EventLoop, ControlFlow, EventLoopWindowTarget}, event::{Event, WindowEvent}};
 
 pub mod shaders;

@@ -24,8 +24,6 @@ use crate::UnconfiguredError;
 use crate::camera::Camera;
 use crate::lighting::{AmbientLight, PointLight};
 
-use self::mesh::AttachmentBuffers;
-
 pub mod mesh;
 pub mod marched;
 
