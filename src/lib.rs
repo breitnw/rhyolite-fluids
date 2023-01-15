@@ -2,9 +2,9 @@
 
 
 
-use std::{time::Instant};
+use std::{time::Instant, fs::ReadDir};
 
-use renderer::{Renderer, marched::MarchedRenderer, mesh::MeshRenderer};
+use renderer::{Renderer, marched::MarchedRenderer, mesh::MeshRenderer, RenderBase};
 use winit::{event_loop::{EventLoop, ControlFlow, EventLoopWindowTarget}, event::{Event, WindowEvent}};
 
 pub mod shaders;
@@ -56,7 +56,7 @@ impl<T: Renderer + 'static> Rhyolite<T> {
                     *control_flow = ControlFlow::Exit;
                 }
                 Event::WindowEvent { event: WindowEvent::Resized(_), .. } => {
-                    self.renderer.recreate_swapchain();
+                    self.renderer.recreate_swapchain_and_buffers();
                 },
                 Event::RedrawEventsCleared => time_state.update(),
                 _ => (),

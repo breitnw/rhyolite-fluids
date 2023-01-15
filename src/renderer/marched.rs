@@ -1,5 +1,3 @@
-use vulkano::swapchain::SwapchainCreateInfo;
-
 use crate::geometry::MarchedObject;
 
 use super::Renderer;
@@ -8,10 +6,20 @@ pub struct MarchedRenderer {
 
 }
 
+impl MarchedRenderer {
+    pub fn new(event_loop: &winit::event_loop::EventLoop<()>) -> Self {
+        todo!()
+    }
+}
+
 impl Renderer for MarchedRenderer {
     type Object = MarchedObject;
 
-    fn new(event_loop: &winit::event_loop::EventLoop<()>) -> Self {
+    fn start(&mut self, camera: &mut crate::camera::Camera) {
+        todo!()
+    }
+
+    fn finish(&mut self) {
         todo!()
     }
 
@@ -35,21 +43,7 @@ impl Renderer for MarchedRenderer {
         todo!()
     }
 
-    /// Recreates the swapchain. Should be called if the swapchain is invalidated, such as by a window resize
-    fn recreate_swapchain(&mut self) {
-        // let (new_swapchain, new_images) = match self.swapchain.recreate(SwapchainCreateInfo {
-        //     image_extent: self.window.inner_size().into(),
-        //     ..self.swapchain.create_info()
-        // }) {
-        //     Ok(r) => r,
-        //     Err(SwapchainCreationError::ImageExtentNotSupported { .. }) => return,
-        //     Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
-        // };
-
-        // self.swapchain = new_swapchain;
-        // // TODO: use a different allocator?
-        // (self.framebuffers, self.attachment_buffers) = super::window_size_dependent_setup(&self.buffer_allocator, &new_images, self.render_pass.clone(), &mut self.viewport);
+    fn recreate_swapchain_and_buffers(&mut self) {
         todo!()
     }
-
 }

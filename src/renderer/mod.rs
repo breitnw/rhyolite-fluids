@@ -1,62 +1,66 @@
-use vulkano;
+use vulkano::{self, sync, swapchain};
 
-use vulkano::buffer::{CpuAccessibleBuffer, CpuBufferPool};
-use vulkano::command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer};
-use vulkano::command_buffer::allocator::{StandardCommandBufferAllocator, StandardCommandBufferAlloc};
-use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
+use vulkano::command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer, CommandBufferUsage, RenderPassBeginInfo, SubpassContents};
+use vulkano::command_buffer::allocator::{StandardCommandBufferAllocator, StandardCommandBufferAlloc, StandardCommandBufferAllocatorCreateInfo};
 use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType};
 use vulkano::device::{Device, DeviceExtensions, DeviceCreateInfo, QueueCreateInfo, Queue};
-use vulkano::image::view::ImageView;
-use vulkano::image::{ImageAccess, SwapchainImage, AttachmentImage};
+use vulkano::image::SwapchainImage;
 use vulkano::instance::{Instance, InstanceCreateInfo};
 use vulkano::library::VulkanLibrary;
-use vulkano::memory::allocator::{MemoryAllocator, GenericMemoryAllocator, FreeListAllocator};
 use vulkano::pipeline::graphics::viewport::Viewport;
-use vulkano::render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass};
-use vulkano::swapchain::{Surface, Swapchain, SwapchainCreateInfo, SwapchainAcquireFuture};
+use vulkano::render_pass::{Framebuffer, RenderPass};
+use vulkano::swapchain::{Surface, Swapchain, SwapchainCreateInfo, SwapchainAcquireFuture, SwapchainCreationError, AcquireError, SwapchainPresentInfo};
 use vulkano::Version;
-use vulkano::format::{Format};
-use vulkano::sync::GpuFuture;
+use vulkano::format::{Format, ClearValue};
+use vulkano::sync::{GpuFuture, FlushError};
 use vulkano_win::VkSurfaceBuild;
 use winit::dpi::LogicalSize;
-use winit::event_loop::{self, EventLoop};
+use winit::event_loop::EventLoop;
 use winit::window::{Window, WindowBuilder};
 
 use std::sync::Arc;
 
 use crate::UnconfiguredError;
 use crate::camera::Camera;
-use crate::geometry::MeshObject;
 use crate::lighting::{AmbientLight, PointLight};
-use crate::shaders::point_frag;
+
+use self::mesh::AttachmentBuffers;
 
 pub mod mesh;
 pub mod marched;
 
+#[derive(Debug, Clone, PartialEq)]
+enum RenderStage {
+    Stopped,
+    Albedo,
+    Ambient,
+    Point,
+    Unlit,
+    Error,
+}
+
 pub trait Renderer {
     type Object;
+    fn start(&mut self, camera: &mut Camera);
+    fn finish(&mut self);
     fn draw_object(&mut self, object: &mut Self::Object) -> Result<(), UnconfiguredError>;
     fn set_ambient(&mut self, light: AmbientLight);
     fn draw_ambient_light(&mut self);
     fn draw_point_light(&mut self, camera: &mut Camera, point_light: &mut PointLight);
     fn draw_object_unlit(&mut self, object: &mut Self::Object) -> Result<(), UnconfiguredError>;
-    fn recreate_swapchain(&mut self);
+    fn recreate_swapchain_and_buffers(&mut self);
 }
 
-pub struct BaseRenderer {
+pub struct RenderBase {
     instance: Arc<Instance>,
     surface: Arc<Surface>,
     window: Arc<Window>,
     device: Arc<Device>,
     queue: Arc<Queue>,
     swapchain: Arc<Swapchain>,
+    images: Vec<Arc<SwapchainImage>>,
 
-    buffer_allocator: Arc<GenericMemoryAllocator<Arc<FreeListAllocator>>>,
-    descriptor_set_allocator: StandardDescriptorSetAllocator,
     command_buffer_allocator: StandardCommandBufferAllocator,
-
-    framebuffers: Vec<Arc<Framebuffer>>,
-    attachment_buffers: AttachmentBuffers,
 
     viewport: Viewport,
     previous_frame_end: Option<Box<dyn GpuFuture>>,
@@ -64,11 +68,13 @@ pub struct BaseRenderer {
     commands: Option<AutoCommandBufferBuilder<PrimaryAutoCommandBuffer<StandardCommandBufferAlloc>, StandardCommandBufferAllocator>>,
     image_idx: u32,
     acquire_future: Option<SwapchainAcquireFuture>,
+
+    render_stage: RenderStage,
     should_recreate_swapchain: bool,
 }
 
-impl BaseRenderer {
-    fn new(event_loop: &EventLoop<()>) -> Self { 
+impl RenderBase {
+    pub fn new(event_loop: &EventLoop<()>) -> Self { 
         // Create the instance, the "root" object of all Vulkan operations
         let instance = get_instance();
 
@@ -87,24 +93,19 @@ impl BaseRenderer {
         // how to show them to the user
         let (swapchain, images) = get_swapchain(&physical_device, &device, &surface, &window);
 
-        
-
-        let mut viewport = Viewport {
+        let viewport = Viewport {
             origin: [0.0, 0.0],
             dimensions: [0.0, 0.0],
             depth_range: 0.0..1.0,
         };
 
-        // Includes framebuffers and other attachments that aren't stored
-        let (framebuffers, attachment_buffers) = window_size_dependent_setup(&buffer_allocator, &images, render_pass.clone(), &mut viewport);
+        let command_buffer_allocator = StandardCommandBufferAllocator::new(device.clone(), StandardCommandBufferAllocatorCreateInfo::default());
 
         let previous_frame_end = Some(Box::new(sync::now(device.clone())) as Box<dyn GpuFuture>);
 
         let commands = None;
         let image_idx = 0;
         let acquire_future = None;
-
-        let render_stage = RenderStage::Stopped;
 
         Self{ 
             instance, 
@@ -113,9 +114,7 @@ impl BaseRenderer {
             device, 
             queue,  
             swapchain,
-
-            framebuffers,
-            attachment_buffers,
+            images,
 
             viewport,
             previous_frame_end,
@@ -124,20 +123,200 @@ impl BaseRenderer {
             image_idx,
             acquire_future,
 
+            command_buffer_allocator,
+
+            render_stage: RenderStage::Stopped,
             should_recreate_swapchain: false,
         } 
     }
+    
 
-    /// Updates the aspect ratio of the camera. Should be called when the window is resized
-    pub fn update_aspect_ratio(&mut self, camera: &mut Camera) {
-        camera.configure(&self.window);
+    /// Starts the rendering process for the current frame
+    fn start(&mut self, framebuffers: &Vec<Arc<Framebuffer>>) {
+
+        self.previous_frame_end.as_mut()
+            .expect("previous_frame_end future is null. Did you remember to finish the previous frame?")
+            .cleanup_finished();
+
+        // Get an image from the swapchain, recreating the swapchain if its settings are suboptimal
+        let (image_idx, suboptimal, acquire_future) = match swapchain::acquire_next_image(self.swapchain.clone(), None) {
+            Ok(r) => r,
+            Err(AcquireError::OutOfDate) => {
+                self.render_stage = RenderStage::Error;
+                self.should_recreate_swapchain = true;
+                return;
+            },
+            Err(e) => panic!("Failed to acquire next image: {:?}", e)
+        };
+
+        if suboptimal {
+            // self.should_recreate_swapchain = true;
+            // TODO: for some reason, swapchain is permanently suboptimal after moving to a retina display and then scaling
+            println!("Swapchain is suboptimal");
+        }
+
+        // Set the clear values for each of the buffers
+        let clear_values: Vec<Option<ClearValue>> = vec![
+            Some(ClearValue::Float([0.0, 0.0, 0.0, 1.0])),
+            Some(ClearValue::Float([0.0, 0.0, 0.0, 1.0])),
+            Some(ClearValue::Float([0.0, 0.0, 0.0, 1.0])),
+            Some(ClearValue::Float([0.0, 0.0, 0.0, 1.0])),
+            Some(ClearValue::Float([0.0, 0.0, 0.0, 1.0])),
+            Some(ClearValue::Depth(1f32)),
+        ];
+
+        // Create a command buffer, which holds a list of commands that rell the graphics hardware what to do
+        let mut command_buffer_builder = AutoCommandBufferBuilder::primary(
+            &self.command_buffer_allocator,
+            self.queue.queue_family_index(),
+            CommandBufferUsage::OneTimeSubmit,
+        ).unwrap();
+
+        command_buffer_builder
+            .begin_render_pass(
+                RenderPassBeginInfo { 
+                    clear_values,
+                    ..RenderPassBeginInfo::framebuffer(framebuffers[image_idx as usize].clone())
+                },
+                SubpassContents::Inline,
+            )
+            .unwrap();
+        
+        self.commands = Some(command_buffer_builder);
+        self.image_idx = image_idx;
+        self.acquire_future = Some(acquire_future);
+
+        let viewport = self.viewport.clone();
+        self.commands_mut().set_viewport(0, [viewport]);
+    }
+    
+    /// Finishes the rendering process and draws to the screen
+    /// # Panics
+    /// Panics if not called after a `draw_object_unlit()` call or a `draw_point()` call
+    fn finish(&mut self) {
+        match self.render_stage {
+            RenderStage::Point => {},
+            RenderStage::Unlit => {},
+            RenderStage::Error => {
+                self.commands = None;
+                return;
+            }
+            _ => panic!("finish() not called in order, rendering stopped")
+        }
+
+        // End and build the render pass
+        let mut command_buffer_builder = self.commands.take().unwrap();
+        command_buffer_builder.end_render_pass().unwrap();
+        let command_buffer = command_buffer_builder.build().unwrap();
+
+        let af = self.acquire_future.take().unwrap();
+        let fe = self.previous_frame_end.take().unwrap();
+
+        let future = fe.join(af)
+            .then_execute(self.queue.clone(), command_buffer).unwrap()
+            .then_swapchain_present(self.queue.clone(), SwapchainPresentInfo::swapchain_image_index(
+                self.swapchain.clone(), 
+                self.image_idx
+            ))
+            .then_signal_fence_and_flush();
+        
+        match future {
+            Ok(future) => {
+                self.previous_frame_end = Some(Box::new(future))
+            }
+            Err(FlushError::OutOfDate) => {
+                self.render_stage = RenderStage::Error;
+                self.previous_frame_end = Some(Box::new(sync::now(self.device.clone())));
+                return;
+            }
+            Err(e) => {
+                println!("Failed to flush future: {:?}", e);
+                self.render_stage = RenderStage::Error;
+                self.previous_frame_end = Some(Box::new(sync::now(self.device.clone())));
+                return;
+            }
+        }
+
+        self.commands = None;
+        self.render_stage = RenderStage::Stopped;
+
+        // TODO: In complicated programs it’s likely that one or more of the operations we’ve just scheduled 
+        // will block. This happens when the graphics hardware can not accept further commands and the program 
+        // has to wait until it can. Vulkan provides no easy way to check for this. Because of this, any serious 
+        // application will probably want to have command submissions done on a dedicated thread so the rest of 
+        // the application can keep running in the background. We will be completely ignoring this for the sake 
+        // of these tutorials but just keep this in mind for your own future work.
     }
 
-    /// Sets up necessary buffers and attaches them to the object
-    pub fn configure_object(&self, object: &mut MeshObject) {
-        object.configure(&self.buffer_allocator)
+    /// Recreates the swapchain. Should be called if the swapchain is invalidated, such as by a window resize
+    fn recreate_swapchain(&mut self) {
+        let (new_swapchain, new_images) = match self.swapchain.recreate(SwapchainCreateInfo {
+            image_extent: self.window.inner_size().into(),
+            ..self.swapchain.create_info()
+        }) {
+            Ok(r) => r,
+            Err(SwapchainCreationError::ImageExtentNotSupported { .. }) => return,
+            Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
+        };
+
+        self.swapchain = new_swapchain;
+        self.images = new_images;
+    }
+
+    fn get_render_stage(&self) -> &RenderStage { &self.render_stage }
+    fn set_render_stage(&mut self, new_stage: RenderStage) {
+        self.render_stage = new_stage;
+    }
+    fn commands_mut(&mut self) -> &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer<StandardCommandBufferAlloc>, StandardCommandBufferAllocator> {
+        // Should never panic because commands is initialized in start()
+        self.commands.as_mut().unwrap()
+    }
+
+    fn should_skip_stage(&self) -> bool {
+        return matches!(self.render_stage, RenderStage::Error)
+    }
+
+    fn assert_stage_order(&mut self, new_stage: RenderStage) {
+        let mut out_of_order = false;
+        match new_stage {
+            RenderStage::Albedo => match self.render_stage {
+                RenderStage::Stopped => {
+                    self.render_stage = RenderStage::Albedo;
+                }
+                RenderStage::Albedo => (),
+                _ => out_of_order = true
+            }
+            RenderStage::Ambient => match self.render_stage {
+                RenderStage::Albedo => {
+                    self.render_stage = RenderStage::Ambient;
+                },
+                _ => out_of_order = true
+            }
+            RenderStage::Point => match self.render_stage {
+                RenderStage::Ambient => {
+                    self.render_stage = RenderStage::Point;
+                }
+                RenderStage::Point => (),
+                _ => out_of_order = true
+            }
+            RenderStage::Unlit => match self.render_stage {
+                RenderStage::Ambient | RenderStage::Point => {
+                    self.render_stage = RenderStage::Unlit;
+                }
+                RenderStage::Unlit => (),
+                _ => out_of_order = true
+            }
+            RenderStage::Stopped => todo!(),
+            RenderStage::Error => todo!(),
+        }
+        if out_of_order {
+            panic!("can't enter {:?} stage after {:?} stage, rendering stopped", new_stage, self.render_stage)
+        }
     }
 }
+
+
+// HELPER FUNCTIONS FOR RenderBase CREATION
 
 /// Selects the best physical device based on the available hardware.
 pub(crate) fn select_physical_device(
@@ -169,85 +348,6 @@ pub(crate) fn select_physical_device(
         })
         .unwrap();
     (physical_device, queue_family as u32)
-}
-
-
-pub(crate) struct AttachmentBuffers {
-    pub albedo_buffer: Arc<ImageView<AttachmentImage>>,
-    pub normal_buffer: Arc<ImageView<AttachmentImage>>,
-    pub frag_pos_buffer: Arc<ImageView<AttachmentImage>>,
-    pub specular_buffer: Arc<ImageView<AttachmentImage>>,
-}
-
-/// Sets up the framebuffers based on the size of the viewport.
-pub(crate) fn window_size_dependent_setup(
-    allocator: &(impl MemoryAllocator + ?Sized),
-    images: &[Arc<SwapchainImage>],
-    render_pass: Arc<RenderPass>,
-    viewport: &mut Viewport,
-) -> (Vec<Arc<Framebuffer>>, AttachmentBuffers) {
-    let dimensions = images[0].dimensions().width_height();
-    viewport.dimensions = [dimensions[0] as f32, dimensions[1] as f32];
-
-    let depth_buffer = ImageView::new_default(
-        AttachmentImage::transient(allocator, dimensions, Format::D16_UNORM).unwrap()
-    ).unwrap();
-    let albedo_buffer = ImageView::new_default(
-        AttachmentImage::transient_input_attachment(
-            allocator, 
-            dimensions, 
-            Format::A2B10G10R10_UNORM_PACK32,
-        ).unwrap()
-    ).unwrap();
-    let normal_buffer = ImageView::new_default(
-        AttachmentImage::transient_input_attachment(
-            allocator, 
-            dimensions, 
-            Format::R16G16B16A16_SFLOAT,
-        ).unwrap()
-    ).unwrap();
-    let frag_pos_buffer = ImageView::new_default(
-        AttachmentImage::transient_input_attachment(
-            allocator, 
-            dimensions, 
-            Format::R16G16B16A16_SFLOAT
-        ).unwrap()
-    ).unwrap();
-    let specular_buffer = ImageView::new_default(
-        AttachmentImage::transient_input_attachment(
-            allocator, 
-            dimensions, 
-            Format::R16G16_SFLOAT,
-        ).unwrap()
-    ).unwrap();
-    
-    let framebuffers = images
-        .iter()
-        .map(|image| {
-            let view = ImageView::new_default(image.clone()).unwrap();
-            Framebuffer::new(
-                render_pass.clone(),
-                FramebufferCreateInfo {
-                    attachments: vec![
-                        view, 
-                        albedo_buffer.clone(),
-                        normal_buffer.clone(),
-                        frag_pos_buffer.clone(),
-                        specular_buffer.clone(),
-                        depth_buffer.clone()
-                    ],
-                    ..Default::default()
-                }
-            ).unwrap()
-        }).collect::<Vec<_>>();
-
-    let attachment_buffers = AttachmentBuffers {
-        albedo_buffer: albedo_buffer.clone(),
-        normal_buffer: normal_buffer.clone(),
-        frag_pos_buffer: frag_pos_buffer.clone(),
-        specular_buffer: specular_buffer.clone(),
-    };
-    (framebuffers, attachment_buffers)
 }
 
 pub(crate) fn get_instance() -> Arc<Instance> {
