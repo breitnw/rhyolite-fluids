@@ -11,6 +11,7 @@ use vulkano::buffer::{CpuBufferPool, TypedBufferAccess, CpuAccessibleBuffer, Buf
 use vulkano::command_buffer::SubpassContents;
 use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
 use vulkano::descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet};
+use vulkano::device::Device;
 use vulkano::image::{AttachmentImage, SwapchainImage, ImageAccess};
 use vulkano::image::view::ImageView;
 use vulkano::memory::allocator::{GenericMemoryAllocator, FreeListAllocator, MemoryAllocator};
@@ -27,12 +28,21 @@ use winit::event_loop::EventLoop;
 
 use std::sync::Arc;
 
-use super::{Renderer, RenderBase, RenderStage};
+use super::{Renderer, RenderBase};
 
 // TODO: Store all functions for advancing stages in an impl for this enum
 
+#[derive(Debug, Clone, PartialEq)]
+enum RenderStage {
+    Stopped,
+    Albedo,
+    Ambient,
+    Point,
+    Unlit,
+}
+
 pub struct MeshRenderer {
-    render_base: RenderBase,
+    base: RenderBase,
 
     render_pass: Arc<RenderPass>,
 
@@ -57,6 +67,8 @@ pub struct MeshRenderer {
 
     framebuffers: Vec<Arc<Framebuffer>>,
     attachment_buffers: AttachmentBuffers,
+
+    render_stage: RenderStage,
 }
 
 impl MeshRenderer {
@@ -67,7 +79,7 @@ impl MeshRenderer {
 
         // Declare the render pass, a structure that lets us define how the rendering process should work. Tells the hardware
         // where it can expect to find input and where it can store output
-        let render_pass = super::get_render_pass(&base.device, base.swapchain.image_format());
+        let render_pass = get_render_pass(&base.device, base.swapchain.image_format());
         let albedo_pass = Subpass::from(render_pass.clone(), 0).unwrap();
         let lighting_pass = Subpass::from(render_pass.clone(), 1).unwrap();
 
@@ -173,7 +185,7 @@ impl MeshRenderer {
         );
 
         Self { 
-            render_base: base, 
+            base, 
 
             buffer_allocator,
             descriptor_set_allocator,
@@ -197,26 +209,15 @@ impl MeshRenderer {
             render_pass,
             framebuffers,
             attachment_buffers,
+
+            render_stage: RenderStage::Stopped,
         }
     }
 
-    /// Updates the aspect ratio of the camera. Should be called when the window is resized
-    pub fn update_aspect_ratio(&mut self, camera: &mut Camera) {
-        camera.configure(&self.render_base.window);
-    }
-
-    /// Sets up necessary buffers and attaches them to the object
-    pub fn configure_object(&self, object: &mut MeshObject) {
-        object.configure(&self.buffer_allocator)
-    }
-}
-
-impl Renderer for MeshRenderer {
-    type Object = MeshObject;
 
     /// Starts the rendering process for the current frame
-    fn start(&mut self, camera: &mut Camera) {
-        let base = &self.render_base;
+    pub fn start(&mut self, camera: &mut Camera) {
+        let base = &self.base;
 
         if !camera.is_configured() {
             camera.configure(&base.window);
@@ -232,29 +233,31 @@ impl Renderer for MeshRenderer {
             ]
         ).unwrap());
 
-        if self.render_base.should_recreate_swapchain {
+        if self.base.should_recreate_swapchain {
             camera.configure(&base.window);
             self.recreate_swapchain_and_buffers();
         }
 
-        self.render_base.start(&mut self.framebuffers);
+        self.base.start(&mut self.framebuffers);
     }
 
     /// Finishes the rendering process and draws to the screen
     /// # Panics
     /// Panics if not called after a `draw_object_unlit()` call or a `draw_point()` call
-    fn finish(&mut self) {
-        self.render_base.finish();
+    pub fn finish(&mut self) {
+        if self.base.render_error { return; }
+        self.update_render_stage(RenderStage::Stopped);
+        self.base.finish();
     }
 
 
     /// Draws an object that will later be lit
     /// # Panics
     /// Panics if not called after a `start()` call or another `draw_object()` call 
-    fn draw_object(&mut self, object: &mut MeshObject) -> Result<(), UnconfiguredError> {
+    pub fn draw_object(&mut self, object: &mut MeshObject) -> Result<(), UnconfiguredError> {
         
-        if self.render_base.should_skip_stage() { return Ok(()); }
-        self.render_base.assert_stage_order(RenderStage::Albedo);
+        if self.base.render_error  { return Ok(()); }
+        self.update_render_stage(RenderStage::Albedo);
 
         let albedo_subbuffer = {
             let (model_mat, normal_mat) = object.transform.get_rendering_matrices();
@@ -292,7 +295,7 @@ impl Renderer for MeshRenderer {
         ).unwrap();
 
         // Add albedo-related commands to the command buffer
-        self.render_base.commands_mut()
+        self.base.commands_mut()
             .bind_pipeline_graphics(self.albedo_pipeline.clone())
             .bind_descriptor_sets(
                 PipelineBindPoint::Graphics, 
@@ -309,7 +312,7 @@ impl Renderer for MeshRenderer {
     }
     
     /// Sets the ambient light to use for rendering
-    fn set_ambient(&mut self, light: AmbientLight) {
+    pub fn set_ambient(&mut self, light: AmbientLight) {
         self.ambient_light_buf = Some(CpuAccessibleBuffer::from_data(
             &self.buffer_allocator, 
             BufferUsage {
@@ -327,12 +330,12 @@ impl Renderer for MeshRenderer {
     /// Draws an ambient light, which adds global illumination to the entire scene
     /// # Panics
     /// Panics if not called after a `draw_object()` call
-    fn draw_ambient_light(&mut self) {
-        if self.render_base.should_skip_stage() { return; }
-        self.render_base.assert_stage_order(RenderStage::Ambient);
+    pub fn draw_ambient_light(&mut self) {
+        if self.base.render_error  { return; }
+        self.update_render_stage(RenderStage::Ambient);
 
         if self.ambient_light_buf.is_none() { 
-            self.render_base.commands_mut()
+            self.base.commands_mut()
                 .next_subpass(SubpassContents::Inline)
                 .unwrap();
             return; 
@@ -349,7 +352,7 @@ impl Renderer for MeshRenderer {
         ).unwrap();
 
         // Add ambient light commands to the command buffer
-        self.render_base.commands_mut()
+        self.base.commands_mut()
             .next_subpass(SubpassContents::Inline)
             .unwrap()
             .bind_pipeline_graphics(self.ambient_light_pipeline.clone())
@@ -367,9 +370,9 @@ impl Renderer for MeshRenderer {
     /// Draws a point light with a specified color and position
     /// # Panics
     /// Panics if not called after a `draw_ambient()` call or `another draw_point()` call
-    fn draw_point_light(&mut self, camera: &mut Camera, point_light: &mut PointLight) {
-        if self.render_base.should_skip_stage() { return; }
-        self.render_base.assert_stage_order(RenderStage::Point);
+    pub fn draw_point_light(&mut self, camera: &mut Camera, point_light: &mut PointLight) {
+        if self.base.render_error { return; }
+        self.update_render_stage(RenderStage::Point);
 
         let point_subbuffer = point_light.get_buffer(&self.point_light_buf_pool);
         let camera_pos_subbuffer = camera.get_pos_subbuffer(&self.camera_pos_buf_pool).unwrap();
@@ -388,7 +391,7 @@ impl Renderer for MeshRenderer {
             ],
         ).unwrap();
 
-        self.render_base.commands_mut()
+        self.base.commands_mut()
             .bind_pipeline_graphics(self.point_light_pipeline.clone())
             .bind_descriptor_sets(
                 PipelineBindPoint::Graphics,
@@ -404,9 +407,9 @@ impl Renderer for MeshRenderer {
     /// Draws an object with an unlit shader by rendering it after shadows are drawn
     /// # Panics
     /// Panics if not called after a `draw_point()` call or another `draw_object_unlit()` call
-    fn draw_object_unlit(&mut self, object: &mut MeshObject) -> Result<(), UnconfiguredError> {
-        if self.render_base.should_skip_stage() { return Ok(()); }
-        self.render_base.assert_stage_order(RenderStage::Unlit);
+    pub fn draw_object_unlit(&mut self, object: &mut MeshObject) -> Result<(), UnconfiguredError> {
+        if self.base.render_error { return Ok(()); }
+        self.update_render_stage(RenderStage::Unlit);
 
         let unlit_subbuffer = {
             let (model_mat, normal_mat) = object.transform.get_rendering_matrices();
@@ -426,7 +429,7 @@ impl Renderer for MeshRenderer {
         ).unwrap();
 
         // Add commands to the command buffer
-        self.render_base.commands_mut()
+        self.base.commands_mut()
             .bind_pipeline_graphics(self.unlit_pipeline.clone())
             .bind_descriptor_sets(
                 PipelineBindPoint::Graphics, 
@@ -441,14 +444,75 @@ impl Renderer for MeshRenderer {
         Ok(())
     }
 
+    /// Updates the aspect ratio of the camera. Should be called when the window is resized
+    pub fn update_aspect_ratio(&mut self, camera: &mut Camera) {
+        camera.configure(&self.base.window);
+    }
+
+    /// Sets up necessary buffers and attaches them to the object
+    pub fn configure_object(&self, object: &mut MeshObject) {
+        object.configure(&self.buffer_allocator)
+    }
+
+    fn get_render_stage(&self) -> &RenderStage { &self.render_stage }
+    fn set_render_stage(&mut self, new_stage: RenderStage) {
+        self.render_stage = new_stage;
+    }
+    fn update_render_stage(&mut self, new_stage: RenderStage) {
+        let mut out_of_order = false;
+        match new_stage {
+            RenderStage::Albedo => match self.render_stage {
+                RenderStage::Stopped => {
+                    self.render_stage = RenderStage::Albedo;
+                }
+                RenderStage::Albedo => (),
+                _ => out_of_order = true
+            }
+            RenderStage::Ambient => match self.render_stage {
+                RenderStage::Albedo => {
+                    self.render_stage = RenderStage::Ambient;
+                },
+                _ => out_of_order = true
+            }
+            RenderStage::Point => match self.render_stage {
+                RenderStage::Ambient => {
+                    self.render_stage = RenderStage::Point;
+                }
+                RenderStage::Point => (),
+                _ => out_of_order = true
+            }
+            RenderStage::Unlit => match self.render_stage {
+                RenderStage::Ambient | RenderStage::Point => {
+                    self.render_stage = RenderStage::Unlit;
+                }
+                RenderStage::Unlit => (),
+                _ => out_of_order = true
+            }
+            RenderStage::Stopped => match self.render_stage {
+                RenderStage::Point | RenderStage::Unlit => {
+                    self.render_stage = RenderStage::Stopped;
+                },
+                _ => out_of_order = true
+            },
+        }
+        if out_of_order {
+            panic!("can't enter {:?} stage after {:?} stage, rendering stopped", new_stage, self.render_stage)
+        }
+    }
+}
+
+
+impl Renderer for MeshRenderer {
+    type Object = MeshObject;
+
     fn recreate_swapchain_and_buffers(&mut self) {
-        self.render_base.recreate_swapchain();
+        self.base.recreate_swapchain();
         // TODO: use a different allocator?
         (self.framebuffers, self.attachment_buffers) = window_size_dependent_setup(
             &self.buffer_allocator, 
-            &self.render_base.images, 
+            &self.base.images, 
             self.render_pass.clone(), 
-            &mut self.render_base.viewport
+            &mut self.base.viewport
         );
     }
 }
@@ -461,7 +525,7 @@ pub(crate) struct AttachmentBuffers {
 }
 
 /// Sets up the framebuffers based on the size of the viewport.
-pub(crate) fn window_size_dependent_setup(
+fn window_size_dependent_setup(
     allocator: &(impl MemoryAllocator + ?Sized),
     images: &[Arc<SwapchainImage>],
     render_pass: Arc<RenderPass>,
@@ -529,4 +593,62 @@ pub(crate) fn window_size_dependent_setup(
         specular_buffer: specular_buffer.clone(),
     };
     (framebuffers, attachment_buffers)
+}
+
+fn get_render_pass(device: &Arc<Device>, final_format: Format) -> Arc<RenderPass> {
+    vulkano::ordered_passes_renderpass!(
+        device.clone(),
+        attachments: {
+            final_color: {
+                load: Clear,
+                store: Store,
+                format: final_format,
+                samples: 1,
+            },
+            albedo: {
+                load: Clear,
+                store: DontCare,
+                format: Format::A2B10G10R10_UNORM_PACK32,
+                samples: 1,
+            },
+            normals: {
+                load: Clear,
+                store: DontCare,
+                format: Format::R16G16B16A16_SFLOAT,
+                samples: 1,
+            },
+            frag_pos: {
+                load: Clear,
+                store: DontCare,
+                format: Format::R16G16B16A16_SFLOAT,
+                samples: 1,
+            },
+            // TODO: textures would typically be used for specular instead of renderpass attachments
+            specular: {
+                load: Clear,
+                store: DontCare,
+                format: Format::R16G16_SFLOAT,
+                samples: 1,
+            },
+            depth: {
+                load: Clear,
+                store: DontCare,
+                format: Format::D16_UNORM,
+                samples: 1,
+            }
+        },
+        passes: [
+            {
+                color: [albedo, normals, frag_pos, specular],
+                depth_stencil: {depth},
+                input: []
+            },
+            {
+                color: [final_color],
+                depth_stencil: {depth},
+                input: [albedo, normals, frag_pos, specular]
+            }
+        ]
+    )
+    .unwrap()
 }

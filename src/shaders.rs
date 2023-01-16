@@ -5,7 +5,7 @@ use vulkano::{shader::ShaderModule, device::Device};
 pub mod albedo_vert {
     vulkano_shaders::shader!{
         ty: "vertex",
-        path: "src/shaders/albedo.vert",
+        path: "src/shaders/mesh/albedo.vert",
         types_meta: {
             use bytemuck::{Pod, Zeroable};
             #[derive(Clone, Copy, Zeroable, Pod)]
@@ -16,7 +16,7 @@ pub mod albedo_vert {
 pub mod albedo_frag {
     vulkano_shaders::shader!{
         ty: "fragment",
-        path: "src/shaders/albedo.frag",
+        path: "src/shaders/mesh/albedo.frag",
         types_meta: {
             use bytemuck::{Pod, Zeroable};
             #[derive(Clone, Copy, Zeroable, Pod)]
@@ -27,14 +27,14 @@ pub mod albedo_frag {
 pub mod point_vert {
     vulkano_shaders::shader!{
         ty: "vertex",
-        path: "src/shaders/lighting/point.vert",
+        path: "src/shaders/mesh/lighting/point.vert",
     }
 }
 
 pub mod point_frag {
     vulkano_shaders::shader!{
         ty: "fragment",
-        path: "src/shaders/lighting/point.frag",
+        path: "src/shaders/mesh/lighting/point.frag",
         types_meta: {
             use bytemuck::{Pod, Zeroable};
             #[derive(Clone, Copy, Zeroable, Pod)]
@@ -45,14 +45,14 @@ pub mod point_frag {
 pub mod ambient_vert {
     vulkano_shaders::shader!{
         ty: "vertex",
-        path: "src/shaders/lighting/ambient.vert",
+        path: "src/shaders/mesh/lighting/ambient.vert",
     }
 }
 
 pub mod ambient_frag {
     vulkano_shaders::shader!{
         ty: "fragment",
-        path: "src/shaders/lighting/ambient.frag",
+        path: "src/shaders/mesh/lighting/ambient.frag",
         types_meta: {
             use bytemuck::{Pod, Zeroable};
             #[derive(Clone, Copy, Zeroable, Pod)]
@@ -63,7 +63,7 @@ pub mod ambient_frag {
 pub mod unlit_vert {
     vulkano_shaders::shader!{
         ty: "vertex",
-        path: "src/shaders/unlit.vert",
+        path: "src/shaders/mesh/unlit.vert",
         types_meta: {
             use bytemuck::{Pod, Zeroable};
             #[derive(Clone, Copy, Zeroable, Pod)]
@@ -74,7 +74,25 @@ pub mod unlit_vert {
 pub mod unlit_frag {
     vulkano_shaders::shader!{
         ty: "fragment",
-        path: "src/shaders/unlit.frag",
+        path: "src/shaders/mesh/unlit.frag",
+    }
+}
+
+pub mod marched_vert {
+    vulkano_shaders::shader!{
+        ty: "vertex",
+        path: "src/shaders/marched/marched.vert",
+    }
+}
+
+pub mod marched_frag {
+    vulkano_shaders::shader!{
+        ty: "fragment",
+        path: "src/shaders/marched/marched.frag",
+        types_meta: {
+            use bytemuck::{Pod, Zeroable};
+            #[derive(Clone, Copy, Zeroable, Pod)]
+        },
     }
 }
 

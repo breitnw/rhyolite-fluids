@@ -8,10 +8,10 @@ use vulkano::image::SwapchainImage;
 use vulkano::instance::{Instance, InstanceCreateInfo};
 use vulkano::library::VulkanLibrary;
 use vulkano::pipeline::graphics::viewport::Viewport;
-use vulkano::render_pass::{Framebuffer, RenderPass};
+use vulkano::render_pass::Framebuffer;
 use vulkano::swapchain::{Surface, Swapchain, SwapchainCreateInfo, SwapchainAcquireFuture, SwapchainCreationError, AcquireError, SwapchainPresentInfo};
 use vulkano::Version;
-use vulkano::format::{Format, ClearValue};
+use vulkano::format::ClearValue;
 use vulkano::sync::{GpuFuture, FlushError};
 use vulkano_win::VkSurfaceBuild;
 use winit::dpi::LogicalSize;
@@ -20,32 +20,11 @@ use winit::window::{Window, WindowBuilder};
 
 use std::sync::Arc;
 
-use crate::UnconfiguredError;
-use crate::camera::Camera;
-use crate::lighting::{AmbientLight, PointLight};
-
 pub mod mesh;
 pub mod marched;
 
-#[derive(Debug, Clone, PartialEq)]
-enum RenderStage {
-    Stopped,
-    Albedo,
-    Ambient,
-    Point,
-    Unlit,
-    Error,
-}
-
 pub trait Renderer {
     type Object;
-    fn start(&mut self, camera: &mut Camera);
-    fn finish(&mut self);
-    fn draw_object(&mut self, object: &mut Self::Object) -> Result<(), UnconfiguredError>;
-    fn set_ambient(&mut self, light: AmbientLight);
-    fn draw_ambient_light(&mut self);
-    fn draw_point_light(&mut self, camera: &mut Camera, point_light: &mut PointLight);
-    fn draw_object_unlit(&mut self, object: &mut Self::Object) -> Result<(), UnconfiguredError>;
     fn recreate_swapchain_and_buffers(&mut self);
 }
 
@@ -67,8 +46,8 @@ pub struct RenderBase {
     image_idx: u32,
     acquire_future: Option<SwapchainAcquireFuture>,
 
-    render_stage: RenderStage,
     should_recreate_swapchain: bool,
+    render_error: bool,
 }
 
 impl RenderBase {
@@ -123,8 +102,8 @@ impl RenderBase {
 
             command_buffer_allocator,
 
-            render_stage: RenderStage::Stopped,
             should_recreate_swapchain: false,
+            render_error: false,
         } 
     }
     
@@ -140,8 +119,8 @@ impl RenderBase {
         let (image_idx, suboptimal, acquire_future) = match swapchain::acquire_next_image(self.swapchain.clone(), None) {
             Ok(r) => r,
             Err(AcquireError::OutOfDate) => {
-                self.render_stage = RenderStage::Error;
                 self.should_recreate_swapchain = true;
+                self.render_error = true;
                 return;
             },
             Err(e) => panic!("Failed to acquire next image: {:?}", e)
@@ -192,15 +171,6 @@ impl RenderBase {
     /// # Panics
     /// Panics if not called after a `draw_object_unlit()` call or a `draw_point()` call
     fn finish(&mut self) {
-        match self.render_stage {
-            RenderStage::Point => {},
-            RenderStage::Unlit => {},
-            RenderStage::Error => {
-                self.commands = None;
-                return;
-            }
-            _ => panic!("finish() not called in order, rendering stopped")
-        }
 
         // End and build the render pass
         let mut command_buffer_builder = self.commands.take().unwrap();
@@ -223,20 +193,19 @@ impl RenderBase {
                 self.previous_frame_end = Some(Box::new(future))
             }
             Err(FlushError::OutOfDate) => {
-                self.render_stage = RenderStage::Error;
+                self.render_error = true;
                 self.previous_frame_end = Some(Box::new(sync::now(self.device.clone())));
                 return;
             }
             Err(e) => {
                 println!("Failed to flush future: {:?}", e);
-                self.render_stage = RenderStage::Error;
+                self.render_error = true;
                 self.previous_frame_end = Some(Box::new(sync::now(self.device.clone())));
                 return;
             }
         }
 
         self.commands = None;
-        self.render_stage = RenderStage::Stopped;
 
         // TODO: In complicated programs it’s likely that one or more of the operations we’ve just scheduled 
         // will block. This happens when the graphics hardware can not accept further commands and the program 
@@ -261,58 +230,11 @@ impl RenderBase {
         self.images = new_images;
     }
 
-    fn get_render_stage(&self) -> &RenderStage { &self.render_stage }
-    fn set_render_stage(&mut self, new_stage: RenderStage) {
-        self.render_stage = new_stage;
-    }
     fn commands_mut(&mut self) -> &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer<StandardCommandBufferAlloc>, StandardCommandBufferAllocator> {
         // Should never panic because commands is initialized in start()
         self.commands.as_mut().unwrap()
     }
-
-    fn should_skip_stage(&self) -> bool {
-        return matches!(self.render_stage, RenderStage::Error)
-    }
-
-    fn assert_stage_order(&mut self, new_stage: RenderStage) {
-        let mut out_of_order = false;
-        match new_stage {
-            RenderStage::Albedo => match self.render_stage {
-                RenderStage::Stopped => {
-                    self.render_stage = RenderStage::Albedo;
-                }
-                RenderStage::Albedo => (),
-                _ => out_of_order = true
-            }
-            RenderStage::Ambient => match self.render_stage {
-                RenderStage::Albedo => {
-                    self.render_stage = RenderStage::Ambient;
-                },
-                _ => out_of_order = true
-            }
-            RenderStage::Point => match self.render_stage {
-                RenderStage::Ambient => {
-                    self.render_stage = RenderStage::Point;
-                }
-                RenderStage::Point => (),
-                _ => out_of_order = true
-            }
-            RenderStage::Unlit => match self.render_stage {
-                RenderStage::Ambient | RenderStage::Point => {
-                    self.render_stage = RenderStage::Unlit;
-                }
-                RenderStage::Unlit => (),
-                _ => out_of_order = true
-            }
-            RenderStage::Stopped => todo!(),
-            RenderStage::Error => todo!(),
-        }
-        if out_of_order {
-            panic!("can't enter {:?} stage after {:?} stage, rendering stopped", new_stage, self.render_stage)
-        }
-    }
 }
-
 
 // HELPER FUNCTIONS FOR RenderBase CREATION
 
@@ -418,64 +340,6 @@ pub(crate) fn get_swapchain(
             composite_alpha: alpha,
             ..Default::default()
         }
-    )
-    .unwrap()
-}
-
-pub(crate) fn get_render_pass(device: &Arc<Device>, final_format: Format) -> Arc<RenderPass> {
-    vulkano::ordered_passes_renderpass!(
-        device.clone(),
-        attachments: {
-            final_color: {
-                load: Clear,
-                store: Store,
-                format: final_format,
-                samples: 1,
-            },
-            albedo: {
-                load: Clear,
-                store: DontCare,
-                format: Format::A2B10G10R10_UNORM_PACK32,
-                samples: 1,
-            },
-            normals: {
-                load: Clear,
-                store: DontCare,
-                format: Format::R16G16B16A16_SFLOAT,
-                samples: 1,
-            },
-            frag_pos: {
-                load: Clear,
-                store: DontCare,
-                format: Format::R16G16B16A16_SFLOAT,
-                samples: 1,
-            },
-            // TODO: textures would typically be used for specular instead of renderpass attachments
-            specular: {
-                load: Clear,
-                store: DontCare,
-                format: Format::R16G16_SFLOAT,
-                samples: 1,
-            },
-            depth: {
-                load: Clear,
-                store: DontCare,
-                format: Format::D16_UNORM,
-                samples: 1,
-            }
-        },
-        passes: [
-            {
-                color: [albedo, normals, frag_pos, specular],
-                depth_stencil: {depth},
-                input: []
-            },
-            {
-                color: [final_color],
-                depth_stencil: {depth},
-                input: [albedo, normals, frag_pos, specular]
-            }
-        ]
     )
     .unwrap()
 }
