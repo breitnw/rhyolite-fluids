@@ -44,7 +44,7 @@ vec3 phong(in vec3 frag_pos, in vec3 light_pos, in vec3 cam_pos) {
     const float specular_intensity = 1.0;
     const float specular_shininess = 64.0;
     const vec3 light_color = vec3(1.0, 0.0, 0.0);
-    const float light_intensity = 1.0;
+    const float light_intensity = 15.0;
 
     vec3 light_dir = light_pos - frag_pos;
     float dist_squared = pow(length(light_dir), 2);
@@ -80,14 +80,6 @@ vec3 ray_march(in vec3 ro, in vec3 rd) {
         if (distance_to_closest < MINIMUM_HIT_DISTANCE) {
             const vec3 light_pos = vec3(2.0, -5.0, 3.0);
             return phong(current_position, light_pos, ro);
-
-            // vec3 direction_to_light = normalize(light_pos - current_position);
-
-            // vec3 normal = get_normal(current_position);
-
-            // float diffuse_intensity = max(0.0, dot(normal, direction_to_light));
-            
-            // return vec3(1.0, 0.0, 0.0) * diffuse_intensity;
         }
         
         if (distance_traveled > MAXIMUM_TRACE_DISTANCE) {
