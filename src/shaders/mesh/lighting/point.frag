@@ -1,26 +1,30 @@
 #version 450
 
+layout(set = 0, binding = 0) uniform VP_Data {
+    mat4 view;
+    mat4 projection;
+} vp_uniforms;
+
 // Unlike binding, the value of input_attachment_index depends on the order the attachments are given in the 
 // renderpass, not in the descriptor set.
-layout(input_attachment_index = 0, set = 0, binding = 0) uniform subpassInput u_color;
-layout(input_attachment_index = 1, set = 0, binding = 1) uniform subpassInput u_normals;
-layout(input_attachment_index = 2, set = 0, binding = 2) uniform subpassInput u_frag_pos;
-layout(input_attachment_index = 3, set = 0, binding = 3) uniform subpassInput u_specular;
+layout(input_attachment_index = 0, set = 1, binding = 0) uniform subpassInput u_color;
+layout(input_attachment_index = 1, set = 1, binding = 1) uniform subpassInput u_normals;
+layout(input_attachment_index = 2, set = 1, binding = 2) uniform subpassInput u_frag_pos;
+layout(input_attachment_index = 3, set = 1, binding = 3) uniform subpassInput u_specular;
 
-layout(set = 0, binding = 4) uniform Point_Light_Data {
+layout(set = 1, binding = 4) uniform Point_Light_Data {
     vec4 position;
     vec3 color;
     float intensity;
 } light;
 
-layout(set = 0, binding = 5) uniform Camera_Data {
-    vec3 position; 
-} camera;
-
 layout(location = 0) out vec4 f_color;
 
 // Phong shading
 void main() {
+    mat4 view_i = inverse(vp_uniforms.view);
+    vec3 cam_pos = vec3(view_i[3][0], view_i[3][1], view_i[3][2]);
+
     vec3 frag_pos = subpassLoad(u_frag_pos).xyz;
 
     vec3 light_dir = light.position.xyz - frag_pos;
@@ -36,7 +40,7 @@ void main() {
     float specular = 0.0;
 
     if (lambertian > 0.0) {
-        vec3 view_dir = normalize(camera.position - frag_pos);
+        vec3 view_dir = normalize(cam_pos - frag_pos);
         vec3 reflect_dir = reflect(-light_dir, normal);
         float specAngle = max(dot(reflect_dir, view_dir), 0.0);
         specular = pow(specAngle, specular_shininess);

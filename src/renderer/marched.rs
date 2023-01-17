@@ -33,9 +33,7 @@ pub struct MarchedRenderer {
     ambient_light_buf: Option<Arc<CpuAccessibleBuffer<ambient_frag::ty::Ambient_Light_Data>>>,
     point_light_buf_pool: CpuBufferPool<point_frag::ty::Point_Light_Data>,
     albedo_buf_pool: CpuBufferPool<albedo_vert::ty::Model_Data>,
-    unlit_buf_pool: CpuBufferPool<unlit_vert::ty::Model_Data>,
     vp_buf_pool: CpuBufferPool<albedo_vert::ty::VP_Data>,
-    camera_pos_buf_pool: CpuBufferPool<point_frag::ty::Camera_Data>,
 
     vp_set: Option<Arc<PersistentDescriptorSet>>,
 
@@ -81,9 +79,7 @@ impl MarchedRenderer {
         let ambient_light_buf = None;
         let point_light_buf_pool = CpuBufferPool::<point_frag::ty::Point_Light_Data>::uniform_buffer(buffer_allocator.clone());
         let albedo_buf_pool = CpuBufferPool::<albedo_vert::ty::Model_Data>::uniform_buffer(buffer_allocator.clone());
-        let unlit_buf_pool = CpuBufferPool::<unlit_vert::ty::Model_Data>::uniform_buffer(buffer_allocator.clone());
         let vp_buf_pool = CpuBufferPool::<albedo_vert::ty::VP_Data>::uniform_buffer(buffer_allocator.clone());
-        let camera_pos_buf_pool = CpuBufferPool::<point_frag::ty::Camera_Data>::uniform_buffer(buffer_allocator.clone());
 
         // Includes framebuffers and other attachments that aren't stored
         let framebuffers = window_size_dependent_setup(
@@ -117,9 +113,7 @@ impl MarchedRenderer {
             ambient_light_buf, 
             point_light_buf_pool, 
             albedo_buf_pool, 
-            unlit_buf_pool, 
             vp_buf_pool, 
-            camera_pos_buf_pool, 
 
             vp_set: None, 
 

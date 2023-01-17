@@ -23,7 +23,6 @@ struct CameraPostConfig {
     aspect_ratio: f32,
     projection: TMat4<f32>,
     vp_subbuffer: Option<Arc<CpuBufferPoolSubbuffer<albedo_vert::ty::VP_Data>>>,
-    pos_subbuffer: Option<Arc<CpuBufferPoolSubbuffer<point_frag::ty::Camera_Data>>>
 }// :)
 
 impl Camera {
@@ -63,7 +62,6 @@ impl Camera {
             aspect_ratio,
             projection,
             vp_subbuffer: None,
-            pos_subbuffer: None,
         });
     }
 
@@ -107,19 +105,5 @@ impl Camera {
             ).unwrap());
         }
         Ok(self.get_post_config()?.vp_subbuffer.as_ref().unwrap().clone())
-    }
-
-    pub(crate) fn get_pos_subbuffer(&mut self, pos_buffer_pool: &CpuBufferPool<point_frag::ty::Camera_Data>)
-    -> Result<Arc<CpuBufferPoolSubbuffer<point_frag::ty::Camera_Data>>, UnconfiguredError> {
-        if self.needs_pos_update {
-            self.needs_pos_update = false;
-            let pos = self.transform().get_translation();
-            self.get_post_config_mut()?.pos_subbuffer = Some(pos_buffer_pool.from_data(
-                point_frag::ty::Camera_Data {
-                    position: pos.into()
-                },
-            ).unwrap());
-        }
-        Ok(self.get_post_config()?.pos_subbuffer.as_ref().unwrap().clone())
     }
 }

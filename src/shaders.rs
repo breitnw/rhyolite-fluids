@@ -40,7 +40,7 @@ pub mod point_frag {
             #[derive(Clone, Copy, Zeroable, Pod)]
         },
     }
-}
+} 
 
 pub mod ambient_vert {
     vulkano_shaders::shader!{

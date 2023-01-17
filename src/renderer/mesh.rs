@@ -54,7 +54,6 @@ pub struct MeshRenderer {
     albedo_buf_pool: CpuBufferPool<albedo_vert::ty::Model_Data>,
     unlit_buf_pool: CpuBufferPool<unlit_vert::ty::Model_Data>,
     vp_buf_pool: CpuBufferPool<albedo_vert::ty::VP_Data>,
-    camera_pos_buf_pool: CpuBufferPool<point_frag::ty::Camera_Data>,
 
     vp_set: Option<Arc<PersistentDescriptorSet>>,
 
@@ -163,7 +162,6 @@ impl MeshRenderer {
         let albedo_buf_pool = CpuBufferPool::<albedo_vert::ty::Model_Data>::uniform_buffer(buffer_allocator.clone());
         let unlit_buf_pool = CpuBufferPool::<unlit_vert::ty::Model_Data>::uniform_buffer(buffer_allocator.clone());
         let vp_buf_pool = CpuBufferPool::<albedo_vert::ty::VP_Data>::uniform_buffer(buffer_allocator.clone());
-        let camera_pos_buf_pool = CpuBufferPool::<point_frag::ty::Camera_Data>::uniform_buffer(buffer_allocator.clone());
 
         // Create a dummy vertex buffer used for full-screen shaders
         let dummy_vertices = CpuAccessibleBuffer::from_iter(
@@ -195,7 +193,6 @@ impl MeshRenderer {
             albedo_buf_pool, 
             unlit_buf_pool, 
             vp_buf_pool, 
-            camera_pos_buf_pool, 
 
             vp_set: None, 
 
@@ -375,7 +372,6 @@ impl MeshRenderer {
         self.update_render_stage(RenderStage::Point);
 
         let point_subbuffer = point_light.get_buffer(&self.point_light_buf_pool);
-        let camera_pos_subbuffer = camera.get_pos_subbuffer(&self.camera_pos_buf_pool).unwrap();
 
         let point_layout = self.point_light_pipeline.layout().set_layouts().get(0).unwrap().clone();
         let point_set = PersistentDescriptorSet::new(
@@ -387,7 +383,6 @@ impl MeshRenderer {
                 WriteDescriptorSet::image_view(2, self.attachment_buffers.frag_pos_buffer.clone()),
                 WriteDescriptorSet::image_view(3, self.attachment_buffers.specular_buffer.clone()),
                 WriteDescriptorSet::buffer(4, point_subbuffer),
-                WriteDescriptorSet::buffer(5, camera_pos_subbuffer),
             ],
         ).unwrap();
 
@@ -397,7 +392,7 @@ impl MeshRenderer {
                 PipelineBindPoint::Graphics,
                 self.point_light_pipeline.layout().clone(),
                 0,
-                point_set,
+                (self.vp_set.as_ref().unwrap().clone(), point_set),
             )
             .bind_vertex_buffers(0, self.dummy_vertices.clone())
             .draw(self.dummy_vertices.len() as u32, 1, 0, 0)
