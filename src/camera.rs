@@ -4,7 +4,7 @@ use nalgebra_glm::{TMat4, perspective};
 use vulkano::buffer::{cpu_pool::CpuBufferPoolSubbuffer, CpuBufferPool};
 use winit::window::Window;
 
-use crate::{transform::Transform, shaders::{albedo_vert, point_frag}, UnconfiguredError};
+use crate::{transform::Transform, shaders::albedo_vert, UnconfiguredError};
 pub struct Camera {
     transform: Transform,
 

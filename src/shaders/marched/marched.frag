@@ -24,10 +24,27 @@ float distance_from_sphere(in vec3 p, in vec3 c, float r) {
 }
 
 float map_the_world(in vec3 p) {
-    float displacement = sin(5.0 * p.x + data.time * 0.5) * sin(5.0 * p.y + data.time * 2.0) * sin(5.0 * p.z + data.time) * 0.25;
-    float sphere_0 = distance_from_sphere(p, vec3(0.0), 1.0);
-    float sphere_1 = distance_from_sphere(p, vec3(sin(data.time * 0.6) * 5.0, 0.0, 0.0), 1.0);
-    return smin(sphere_0 + displacement, sphere_1, 2.0);
+    // float displacement = sin(5.0 * p.x + data.time * 0.5) * sin(5.0 * p.y + data.time * 2.0) * sin(5.0 * p.z + data.time) * 0.25;
+    // float sphere_0 = distance_from_sphere(p, vec3(0.0), 1.0);
+    // float sphere_1 = distance_from_sphere(p, vec3(sin(data.time * 0.6) * 5.0, 0.0, 0.0), 1.0);
+    
+    // return smin(sphere_0 + displacement, sphere_1, 2.0);
+    
+    float _ = data.time;
+
+    float fx = 0.0;
+    float fy = 0.0;
+    float result = distance_from_sphere(p, vec3(0.0), 0.1);
+    for (int x = 0; x < 9; x++) {
+        for (int y = 0; y < 9; y++) {
+            result = smin(result, distance_from_sphere(p, vec3(fx, .0, fy), 0.45), 2.0);
+            fy += 2.0;
+        }
+        fx += 2.0;
+        fy = 0.0;
+    }
+    return result;
+    
 }
 
 vec3 get_normal(in vec3 p) {

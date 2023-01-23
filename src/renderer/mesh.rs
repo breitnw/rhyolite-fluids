@@ -30,8 +30,6 @@ use std::sync::Arc;
 
 use super::{Renderer, RenderBase};
 
-// TODO: Store all functions for advancing stages in an impl for this enum
-
 #[derive(Debug, Clone, PartialEq)]
 enum RenderStage {
     Stopped,
@@ -39,6 +37,50 @@ enum RenderStage {
     Ambient,
     Point,
     Unlit,
+}
+
+impl RenderStage {
+    fn update(&mut self, new_stage: RenderStage) {
+        let mut out_of_order = false;
+        match new_stage {
+            RenderStage::Albedo => match self {
+                RenderStage::Stopped => {
+                    *self = RenderStage::Albedo;
+                }
+                RenderStage::Albedo => (),
+                _ => out_of_order = true
+            }
+            RenderStage::Ambient => match self {
+                RenderStage::Albedo => {
+                    *self = RenderStage::Ambient;
+                },
+                _ => out_of_order = true
+            }
+            RenderStage::Point => match self {
+                RenderStage::Ambient => {
+                    *self = RenderStage::Point;
+                }
+                RenderStage::Point => (),
+                _ => out_of_order = true
+            }
+            RenderStage::Unlit => match self {
+                RenderStage::Ambient | RenderStage::Point => {
+                    *self = RenderStage::Unlit;
+                }
+                RenderStage::Unlit => (),
+                _ => out_of_order = true
+            }
+            RenderStage::Stopped => match self {
+                RenderStage::Point | RenderStage::Unlit => {
+                    *self = RenderStage::Stopped;
+                },
+                _ => out_of_order = true
+            },
+        }
+        if out_of_order {
+            panic!("can't enter {:?} stage after {:?} stage, rendering stopped", new_stage, self)
+        }
+    }
 }
 
 pub struct MeshRenderer {
@@ -74,7 +116,7 @@ impl MeshRenderer {
     pub fn new(event_loop: &EventLoop<()>) -> Self {
         let mut base = RenderBase::new(&event_loop);
 
-        let shaders = Shaders::default(&base.device);
+        let shaders = Shaders::mesh_default(&base.device);
 
         // Declare the render pass, a structure that lets us define how the rendering process should work. Tells the hardware
         // where it can expect to find input and where it can store output
@@ -106,7 +148,7 @@ impl MeshRenderer {
                     color_op: BlendOp::Add,
                     color_source: BlendFactor::One,
                     color_destination: BlendFactor::One,
-                    alpha_op: BlendOp::Max, 
+                    alpha_op: BlendOp::Max,
                     alpha_source: BlendFactor::One,
                     alpha_destination: BlendFactor::One,
                 }
@@ -243,7 +285,7 @@ impl MeshRenderer {
     /// Panics if not called after a `draw_object_unlit()` call or a `draw_point()` call
     pub fn finish(&mut self) {
         if self.base.render_error { return; }
-        self.update_render_stage(RenderStage::Stopped);
+        self.render_stage.update(RenderStage::Stopped);
         self.base.finish();
     }
 
@@ -254,7 +296,7 @@ impl MeshRenderer {
     pub fn draw_object(&mut self, object: &mut MeshObject) -> Result<(), UnconfiguredError> {
         
         if self.base.render_error  { return Ok(()); }
-        self.update_render_stage(RenderStage::Albedo);
+        self.render_stage.update(RenderStage::Albedo);
 
         let albedo_subbuffer = {
             let (model_mat, normal_mat) = object.transform.get_rendering_matrices();
@@ -329,7 +371,7 @@ impl MeshRenderer {
     /// Panics if not called after a `draw_object()` call
     pub fn draw_ambient_light(&mut self) {
         if self.base.render_error  { return; }
-        self.update_render_stage(RenderStage::Ambient);
+        self.render_stage.update(RenderStage::Ambient);
 
         if self.ambient_light_buf.is_none() { 
             self.base.commands_mut()
@@ -367,13 +409,13 @@ impl MeshRenderer {
     /// Draws a point light with a specified color and position
     /// # Panics
     /// Panics if not called after a `draw_ambient()` call or `another draw_point()` call
-    pub fn draw_point_light(&mut self, camera: &mut Camera, point_light: &mut PointLight) {
+    pub fn draw_point_light(&mut self, point_light: &mut PointLight) {
         if self.base.render_error { return; }
-        self.update_render_stage(RenderStage::Point);
+        self.render_stage.update(RenderStage::Point);
 
         let point_subbuffer = point_light.get_buffer(&self.point_light_buf_pool);
 
-        let point_layout = self.point_light_pipeline.layout().set_layouts().get(0).unwrap().clone();
+        let point_layout = self.point_light_pipeline.layout().set_layouts().get(1).unwrap().clone();
         let point_set = PersistentDescriptorSet::new(
             &self.descriptor_set_allocator,
             point_layout.clone(),
@@ -388,7 +430,7 @@ impl MeshRenderer {
 
         self.base.commands_mut()
             .bind_pipeline_graphics(self.point_light_pipeline.clone())
-            .bind_descriptor_sets(
+            .bind_descriptor_sets( 
                 PipelineBindPoint::Graphics,
                 self.point_light_pipeline.layout().clone(),
                 0,
@@ -404,7 +446,7 @@ impl MeshRenderer {
     /// Panics if not called after a `draw_point()` call or another `draw_object_unlit()` call
     pub fn draw_object_unlit(&mut self, object: &mut MeshObject) -> Result<(), UnconfiguredError> {
         if self.base.render_error { return Ok(()); }
-        self.update_render_stage(RenderStage::Unlit);
+        self.render_stage.update(RenderStage::Unlit);
 
         let unlit_subbuffer = {
             let (model_mat, normal_mat) = object.transform.get_rendering_matrices();
@@ -452,47 +494,6 @@ impl MeshRenderer {
     fn get_render_stage(&self) -> &RenderStage { &self.render_stage }
     fn set_render_stage(&mut self, new_stage: RenderStage) {
         self.render_stage = new_stage;
-    }
-    fn update_render_stage(&mut self, new_stage: RenderStage) {
-        let mut out_of_order = false;
-        match new_stage {
-            RenderStage::Albedo => match self.render_stage {
-                RenderStage::Stopped => {
-                    self.render_stage = RenderStage::Albedo;
-                }
-                RenderStage::Albedo => (),
-                _ => out_of_order = true
-            }
-            RenderStage::Ambient => match self.render_stage {
-                RenderStage::Albedo => {
-                    self.render_stage = RenderStage::Ambient;
-                },
-                _ => out_of_order = true
-            }
-            RenderStage::Point => match self.render_stage {
-                RenderStage::Ambient => {
-                    self.render_stage = RenderStage::Point;
-                }
-                RenderStage::Point => (),
-                _ => out_of_order = true
-            }
-            RenderStage::Unlit => match self.render_stage {
-                RenderStage::Ambient | RenderStage::Point => {
-                    self.render_stage = RenderStage::Unlit;
-                }
-                RenderStage::Unlit => (),
-                _ => out_of_order = true
-            }
-            RenderStage::Stopped => match self.render_stage {
-                RenderStage::Point | RenderStage::Unlit => {
-                    self.render_stage = RenderStage::Stopped;
-                },
-                _ => out_of_order = true
-            },
-        }
-        if out_of_order {
-            panic!("can't enter {:?} stage after {:?} stage, rendering stopped", new_stage, self.render_stage)
-        }
     }
 }
 

@@ -1,9 +1,6 @@
 #version 450
 
-layout(set = 0, binding = 0) uniform VP_Data {
-    mat4 view;
-    mat4 projection;
-} vp_uniforms;
+layout(location = 0) in vec3 cam_pos;
 
 // Unlike binding, the value of input_attachment_index depends on the order the attachments are given in the 
 // renderpass, not in the descriptor set.
@@ -22,8 +19,8 @@ layout(location = 0) out vec4 f_color;
 
 // Phong shading
 void main() {
-    mat4 view_i = inverse(vp_uniforms.view);
-    vec3 cam_pos = vec3(view_i[3][0], view_i[3][1], view_i[3][2]);
+    // mat4 view_i = inverse(vp_uniforms.view);
+    // vec3 cam_pos = vec3(view_i[3][0], view_i[3][1], view_i[3][2]);
 
     vec3 frag_pos = subpassLoad(u_frag_pos).xyz;
 

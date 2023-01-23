@@ -18,7 +18,7 @@ use crate::camera::Camera;
 use crate::geometry::dummy::DummyVertex;
 use crate::lighting::{PointLight, AmbientLight};
 use crate::shaders::{ShaderModulePair, marched_vert, marched_frag};
-use crate::{geometry::MarchedObject, shaders::{ambient_frag, point_frag, albedo_vert, unlit_vert}};
+use crate::{geometry::MarchedObject, shaders::{ambient_frag, point_frag, albedo_vert}};
 
 use super::{Renderer, RenderBase};
 
@@ -200,7 +200,7 @@ impl MarchedRenderer {
     } 
 
     fn set_ambient(&mut self, ambient_light: AmbientLight) {
-
+        
     }
 
     /// Updates the aspect ratio of the camera. Should be called when the window is resized

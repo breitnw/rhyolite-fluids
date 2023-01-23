@@ -39,7 +39,7 @@ pub mod point_frag {
             use bytemuck::{Pod, Zeroable};
             #[derive(Clone, Copy, Zeroable, Pod)]
         },
-    }
+    } 
 } 
 
 pub mod ambient_vert {
@@ -94,7 +94,7 @@ pub mod marched_frag {
             #[derive(Clone, Copy, Zeroable, Pod)]
         },
     }
-}
+} 
 
 // TODO: find a better way to do this
 
@@ -109,7 +109,7 @@ pub struct Shaders {
     pub unlit: ShaderModulePair
 }
 impl Shaders {
-    pub fn default(device: &Arc<Device>) -> Self {
+    pub fn mesh_default(device: &Arc<Device>) -> Self {
         Self { 
             albedo: ShaderModulePair { 
                 vert: albedo_vert::load(device.clone()).unwrap(), 
