@@ -1,5 +1,7 @@
 #version 450
 
+#define MAX_POINT_LIGHTS 16
+
 layout(location = 0) in vec2 uv;
 
 layout(set = 0, binding = 0) uniform VP_Data {
@@ -7,9 +9,21 @@ layout(set = 0, binding = 0) uniform VP_Data {
     mat4 projection;
 } vp_uniforms;
 
-layout(set = 1, binding = 0) uniform marching_data {
-    float time;
-} data;
+// layout(set = 0, binding = 1) uniform Ambient_Light_Data {
+//     vec3 color;
+//     float intensity;
+// } ambient_light;
+
+struct Point_Light {
+    vec4 position;
+    vec3 color;
+    float intensity;
+};
+
+layout(set = 1, binding = 0) uniform Light_Data {
+    Point_Light point[MAX_POINT_LIGHTS];
+    int point_len;
+} lights;
 
 layout(location = 0) out vec4 out_color;
 
@@ -24,14 +38,6 @@ float distance_from_sphere(in vec3 p, in vec3 c, float r) {
 }
 
 float map_the_world(in vec3 p) {
-    // float displacement = sin(5.0 * p.x + data.time * 0.5) * sin(5.0 * p.y + data.time * 2.0) * sin(5.0 * p.z + data.time) * 0.25;
-    // float sphere_0 = distance_from_sphere(p, vec3(0.0), 1.0);
-    // float sphere_1 = distance_from_sphere(p, vec3(sin(data.time * 0.6) * 5.0, 0.0, 0.0), 1.0);
-    
-    // return smin(sphere_0 + displacement, sphere_1, 2.0);
-    
-    float _ = data.time;
-
     float fx = 0.0;
     float fy = 0.0;
     float result = distance_from_sphere(p, vec3(0.0), 0.1);
@@ -57,13 +63,11 @@ vec3 get_normal(in vec3 p) {
     return normalize(normal);
 }
 
-vec3 phong(in vec3 frag_pos, in vec3 light_pos, in vec3 cam_pos) {
+vec3 phong(in vec3 frag_pos, in Point_Light light, in vec3 cam_pos) {
     const float specular_intensity = 1.0;
     const float specular_shininess = 64.0;
-    const vec3 light_color = vec3(1.0, 0.0, 0.0);
-    const float light_intensity = 15.0;
 
-    vec3 light_dir = light_pos - frag_pos;
+    vec3 light_dir = vec3(light.position) - frag_pos;
     float dist_squared = pow(length(light_dir), 2);
     light_dir = normalize(light_dir);
 
@@ -79,9 +83,15 @@ vec3 phong(in vec3 frag_pos, in vec3 light_pos, in vec3 cam_pos) {
         specular = pow(spec_angle, specular_shininess);
     }
 
-    vec3 out_color = (lambertian * light_color + specular) * light_intensity / dist_squared;
+    return (lambertian + specular) * light.color * light.intensity / dist_squared;
+}
 
-    return 1.0 * out_color;
+vec3 get_lighting(in vec3 frag_pos, in vec3 cam_pos) {
+    vec3 out_color = vec3(0.0);
+    for (int i = 0; i < lights.point_len; i++) {
+        out_color += phong(frag_pos, lights.point[i], cam_pos);
+    }
+    return out_color;
 }
 
 vec3 ray_march(in vec3 ro, in vec3 rd) {
@@ -95,8 +105,7 @@ vec3 ray_march(in vec3 ro, in vec3 rd) {
         float distance_to_closest = map_the_world(current_position);
         
         if (distance_to_closest < MINIMUM_HIT_DISTANCE) {
-            const vec3 light_pos = vec3(2.0, -5.0, 3.0);
-            return phong(current_position, light_pos, ro);
+            return get_lighting(current_position, ro);
         }
         
         if (distance_traveled > MAXIMUM_TRACE_DISTANCE) {

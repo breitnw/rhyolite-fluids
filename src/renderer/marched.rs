@@ -31,7 +31,7 @@ pub struct MarchedRenderer {
     descriptor_set_allocator: StandardDescriptorSetAllocator,
 
     ambient_light_buf: Option<Arc<CpuAccessibleBuffer<ambient_frag::ty::Ambient_Light_Data>>>,
-    point_light_buf_pool: CpuBufferPool<point_frag::ty::Point_Light_Data>,
+    point_light_buf_pool: CpuBufferPool<marched_frag::ty::Point_Light>,
     albedo_buf_pool: CpuBufferPool<albedo_vert::ty::Model_Data>,
     vp_buf_pool: CpuBufferPool<albedo_vert::ty::VP_Data>,
 
@@ -77,7 +77,7 @@ impl MarchedRenderer {
 
         // Buffers and buffer pools
         let ambient_light_buf = None;
-        let point_light_buf_pool = CpuBufferPool::<point_frag::ty::Point_Light_Data>::uniform_buffer(buffer_allocator.clone());
+        let point_light_buf_pool = CpuBufferPool::<marched_frag::ty::Point_Light>::uniform_buffer(buffer_allocator.clone());
         let albedo_buf_pool = CpuBufferPool::<albedo_vert::ty::Model_Data>::uniform_buffer(buffer_allocator.clone());
         let vp_buf_pool = CpuBufferPool::<albedo_vert::ty::VP_Data>::uniform_buffer(buffer_allocator.clone());
 
@@ -154,26 +154,26 @@ impl MarchedRenderer {
     }
 
     /// Finishes the rendering process and draws to the screen
-    pub fn finish(&mut self, time: f32) {
+    pub fn finish(&mut self) {
         if self.base.render_error { return; }
+        self.point_lights = vec![PointLight::new(nalgebra_glm::vec3(0.0, 2.0, -10.0), 40.0, [1.0, 1.0, 1.0])];
 
-        // TODO: BAD!!!!!!!!!!!!!!!!!!!!!!!!!
-        let buf = CpuAccessibleBuffer::from_data(
-            &self.buffer_allocator, 
-            BufferUsage { 
-                uniform_buffer: true,
-                ..Default::default()
-            }, 
-            false,
-            marched_frag::ty::marching_data {
-                time,
-            },
-        ).unwrap();
+        let point_lights = self.point_lights.iter().map(|light| {
+            let position = light.get_position();
+            let position_arr = [position.x, position.y, position.z, 0.0];
+            marched_frag::ty::Point_Light{
+                position: position_arr.into(),
+                color: *light.get_color(),
+                intensity: light.get_intensity(),
+            }
+        });
+        let point_light_buf = self.point_light_buf_pool.from_iter(point_lights).unwrap();
+        
         let layout = self.pipeline.layout().set_layouts().get(1).unwrap().clone();
         let set = PersistentDescriptorSet::new(
             &self.descriptor_set_allocator,
             layout.clone(),
-            [WriteDescriptorSet::buffer(0, buf)]
+            [WriteDescriptorSet::buffer(0, point_light_buf)]
         ).unwrap();
         
         self.base.commands_mut()
@@ -196,7 +196,7 @@ impl MarchedRenderer {
     }
 
     fn add_point_light(&mut self, point_light: &mut PointLight) {
-
+        
     } 
 
     fn set_ambient(&mut self, ambient_light: AmbientLight) {

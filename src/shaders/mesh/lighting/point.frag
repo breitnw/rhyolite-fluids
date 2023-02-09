@@ -19,9 +19,6 @@ layout(location = 0) out vec4 f_color;
 
 // Phong shading
 void main() {
-    // mat4 view_i = inverse(vp_uniforms.view);
-    // vec3 cam_pos = vec3(view_i[3][0], view_i[3][1], view_i[3][2]);
-
     vec3 frag_pos = subpassLoad(u_frag_pos).xyz;
 
     vec3 light_dir = light.position.xyz - frag_pos;
@@ -43,7 +40,7 @@ void main() {
         specular = pow(specAngle, specular_shininess);
     }
 
-    vec3 light_color = (lambertian * light.color + specular) * light.intensity / dist_squared;
+    vec3 light_color = (lambertian * light.color + specular * light.color) * light.intensity / dist_squared;
 
     f_color = vec4(subpassLoad(u_color).rgb * light_color, 1.0);
 }

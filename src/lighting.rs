@@ -17,6 +17,8 @@ pub struct PointLight {
     buffer: Option<Arc<CpuBufferPoolSubbuffer<Point_Light_Data>>>,
 }
 
+
+// TODO: changing light data at runtime might not work
 impl PointLight {
     pub fn new(position: Vec3, intensity: f32, color: [f32; 3]) -> Self {
         Self {
@@ -34,6 +36,15 @@ impl PointLight {
     }
     pub fn set_color(&mut self, color: [f32; 3]) {
         self.color = color;
+    }
+    pub fn get_color(&self) -> &[f32; 3] {
+        &self.color
+    }
+    pub fn set_intensity(&mut self, intensity: f32) {
+        self.intensity = intensity;
+    }
+    pub fn get_intensity(&self) -> f32 {
+        self.intensity
     }
     pub(crate) fn get_buffer(
         &mut self,
