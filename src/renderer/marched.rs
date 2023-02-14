@@ -1,3 +1,4 @@
+use std::mem::MaybeUninit;
 use std::sync::Arc;
 
 use vulkano::descriptor_set::WriteDescriptorSet;
@@ -17,6 +18,7 @@ use vulkano::pipeline::{GraphicsPipeline, PipelineBindPoint, Pipeline};
 use crate::camera::Camera;
 use crate::geometry::dummy::DummyVertex;
 use crate::lighting::{PointLight, AmbientLight};
+use crate::shaders::marched_frag::ty::Point_Light;
 use crate::shaders::{ShaderModulePair, marched_vert, marched_frag};
 use crate::{geometry::MarchedObject, shaders::{ambient_frag, point_frag, albedo_vert}};
 
@@ -31,8 +33,8 @@ pub struct MarchedRenderer {
     descriptor_set_allocator: StandardDescriptorSetAllocator,
 
     ambient_light_buf: Option<Arc<CpuAccessibleBuffer<ambient_frag::ty::Ambient_Light_Data>>>,
-    point_light_buf_pool: CpuBufferPool<marched_frag::ty::Point_Light>,
-    albedo_buf_pool: CpuBufferPool<albedo_vert::ty::Model_Data>,
+    point_light_buf_pool: CpuBufferPool<marched_frag::ty::Light_Data>,
+    // albedo_buf_pool: CpuBufferPool<albedo_vert::ty::Model_Data>,
     vp_buf_pool: CpuBufferPool<albedo_vert::ty::VP_Data>,
 
     vp_set: Option<Arc<PersistentDescriptorSet>>,
@@ -77,8 +79,8 @@ impl MarchedRenderer {
 
         // Buffers and buffer pools
         let ambient_light_buf = None;
-        let point_light_buf_pool = CpuBufferPool::<marched_frag::ty::Point_Light>::uniform_buffer(buffer_allocator.clone());
-        let albedo_buf_pool = CpuBufferPool::<albedo_vert::ty::Model_Data>::uniform_buffer(buffer_allocator.clone());
+        let point_light_buf_pool = CpuBufferPool::<marched_frag::ty::Light_Data>::uniform_buffer(buffer_allocator.clone());
+        // let albedo_buf_pool = CpuBufferPool::<albedo_vert::ty::Model_Data>::uniform_buffer(buffer_allocator.clone());
         let vp_buf_pool = CpuBufferPool::<albedo_vert::ty::VP_Data>::uniform_buffer(buffer_allocator.clone());
 
         // Includes framebuffers and other attachments that aren't stored
@@ -112,7 +114,7 @@ impl MarchedRenderer {
 
             ambient_light_buf, 
             point_light_buf_pool, 
-            albedo_buf_pool, 
+            // albedo_buf_pool, 
             vp_buf_pool, 
 
             vp_set: None, 
@@ -156,9 +158,14 @@ impl MarchedRenderer {
     /// Finishes the rendering process and draws to the screen
     pub fn finish(&mut self) {
         if self.base.render_error { return; }
-        self.point_lights = vec![PointLight::new(nalgebra_glm::vec3(0.0, 2.0, -10.0), 40.0, [1.0, 1.0, 1.0])];
 
-        let point_lights = self.point_lights.iter().map(|light| {
+        // Add point lights to the scene
+        self.point_lights = vec![
+            PointLight::new(nalgebra_glm::vec3(0.0, 10.0, -10.0), 40.0, [0.0, 0.2, 1.0]),
+            PointLight::new(nalgebra_glm::vec3(0.0, -10.0, 10.0), 40.0, [1.0, 0.2, 0.0])
+        ];
+
+        let point_lights: Vec<Point_Light> = self.point_lights.iter().map(|light| {
             let position = light.get_position();
             let position_arr = [position.x, position.y, position.z, 0.0];
             marched_frag::ty::Point_Light{
@@ -166,9 +173,27 @@ impl MarchedRenderer {
                 color: *light.get_color(),
                 intensity: light.get_intensity(),
             }
-        });
-        let point_light_buf = self.point_light_buf_pool.from_iter(point_lights).unwrap();
-        
+        }).collect();
+
+        let mut uninit_array: MaybeUninit<[Point_Light; 16]> = MaybeUninit::uninit();
+        let mut ptr_i = uninit_array.as_mut_ptr() as *mut Point_Light;
+        let point_lights_arr : [Point_Light; 16] = unsafe {
+            for i in 0..point_lights.len() {
+                let value_i = i;
+                ptr_i.write(point_lights[i]);
+                ptr_i = ptr_i.add(1);
+            }
+            uninit_array.assume_init()
+        };
+
+        let point_light_buf = self.point_light_buf_pool.from_data(
+            marched_frag::ty::Light_Data {
+                point: point_lights_arr,
+                point_len: point_lights.len() as i32
+            }
+        ).unwrap();
+
+        // Create the descriptor sets and draw to the scene
         let layout = self.pipeline.layout().set_layouts().get(1).unwrap().clone();
         let set = PersistentDescriptorSet::new(
             &self.descriptor_set_allocator,
