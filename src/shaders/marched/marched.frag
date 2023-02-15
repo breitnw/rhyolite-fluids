@@ -91,6 +91,7 @@ vec3 get_lighting(in vec3 frag_pos, in vec3 cam_pos) {
     for (int i = 0; i < point_lights.len; i++) {
         out_color += phong(frag_pos, point_lights.data[i], cam_pos);
     }
+    out_color += ambient_light.color * ambient_light.intensity;
     return out_color;
 }
 

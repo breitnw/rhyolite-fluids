@@ -295,12 +295,8 @@ unsafe fn get_point_light_arr<const MAX_LEN: usize>(point_lights: &Vec<PointLigh
             color: *light.get_color(),
             intensity: light.get_intensity(),
         };
-        unsafe {
-            ptr_i.write(u_light);
-            ptr_i = ptr_i.add(1);
-        }
+        ptr_i.write(u_light);
+        ptr_i = ptr_i.add(1);
     }
-    unsafe {
-        uninit_array.assume_init()
-    }
+    uninit_array.assume_init()
 }
