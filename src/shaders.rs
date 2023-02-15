@@ -93,7 +93,7 @@ pub mod marched_frag {
             use bytemuck::{Pod, Zeroable};
             #[derive(Clone, Copy, Zeroable, Pod)]
         },
-    }
+    } 
 } 
 
 // TODO: find a better way to do this
@@ -102,6 +102,15 @@ pub struct ShaderModulePair {
     pub vert: Arc<ShaderModule>,
     pub frag: Arc<ShaderModule>,
 }
+
+impl ShaderModulePair {
+    pub(crate) fn marched_default(device: &Arc<Device>) -> Self {
+        Self { 
+            vert: marched_vert::load(device.clone()).unwrap(), 
+            frag: marched_frag::load(device.clone()).unwrap(),
+        }
+    }
+}
 pub struct Shaders {
     pub albedo: ShaderModulePair,
     pub point: ShaderModulePair,
@@ -109,7 +118,7 @@ pub struct Shaders {
     pub unlit: ShaderModulePair
 }
 impl Shaders {
-    pub fn mesh_default(device: &Arc<Device>) -> Self {
+    pub(crate) fn mesh_default(device: &Arc<Device>) -> Self {
         Self { 
             albedo: ShaderModulePair { 
                 vert: albedo_vert::load(device.clone()).unwrap(), 

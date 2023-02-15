@@ -91,11 +91,11 @@ pub struct MeshRenderer {
     buffer_allocator: Arc<GenericMemoryAllocator<Arc<FreeListAllocator>>>,
     descriptor_set_allocator: StandardDescriptorSetAllocator,
 
-    ambient_light_buf: Option<Arc<CpuAccessibleBuffer<ambient_frag::ty::Ambient_Light_Data>>>,
-    point_light_buf_pool: CpuBufferPool<point_frag::ty::Point_Light_Data>,
-    albedo_buf_pool: CpuBufferPool<albedo_vert::ty::Model_Data>,
-    unlit_buf_pool: CpuBufferPool<unlit_vert::ty::Model_Data>,
-    vp_buf_pool: CpuBufferPool<albedo_vert::ty::VP_Data>,
+    ambient_light_buf: Option<Arc<CpuAccessibleBuffer<ambient_frag::ty::UAmbientLightData>>>,
+    point_light_buf_pool: CpuBufferPool<point_frag::ty::UPointLightData>,
+    albedo_buf_pool: CpuBufferPool<albedo_vert::ty::UModelData>,
+    unlit_buf_pool: CpuBufferPool<unlit_vert::ty::UModelData>,
+    vp_buf_pool: CpuBufferPool<albedo_vert::ty::UCamData>,
 
     vp_set: Option<Arc<PersistentDescriptorSet>>,
 
@@ -200,10 +200,10 @@ impl MeshRenderer {
 
         // Buffers and buffer pools
         let ambient_light_buf = None;
-        let point_light_buf_pool = CpuBufferPool::<point_frag::ty::Point_Light_Data>::uniform_buffer(buffer_allocator.clone());
-        let albedo_buf_pool = CpuBufferPool::<albedo_vert::ty::Model_Data>::uniform_buffer(buffer_allocator.clone());
-        let unlit_buf_pool = CpuBufferPool::<unlit_vert::ty::Model_Data>::uniform_buffer(buffer_allocator.clone());
-        let vp_buf_pool = CpuBufferPool::<albedo_vert::ty::VP_Data>::uniform_buffer(buffer_allocator.clone());
+        let point_light_buf_pool = CpuBufferPool::<point_frag::ty::UPointLightData>::uniform_buffer(buffer_allocator.clone());
+        let albedo_buf_pool = CpuBufferPool::<albedo_vert::ty::UModelData>::uniform_buffer(buffer_allocator.clone());
+        let unlit_buf_pool = CpuBufferPool::<unlit_vert::ty::UModelData>::uniform_buffer(buffer_allocator.clone());
+        let vp_buf_pool = CpuBufferPool::<albedo_vert::ty::UCamData>::uniform_buffer(buffer_allocator.clone());
 
         // Create a dummy vertex buffer used for full-screen shaders
         let dummy_vertices = CpuAccessibleBuffer::from_iter(
@@ -300,7 +300,7 @@ impl MeshRenderer {
 
         let albedo_subbuffer = {
             let (model_mat, normal_mat) = object.transform.get_rendering_matrices();
-            let uniform_data = albedo_vert::ty::Model_Data {
+            let uniform_data = albedo_vert::ty::UModelData {
                 model: model_mat.into(),
                 normals: normal_mat.into(),
             };
@@ -317,7 +317,7 @@ impl MeshRenderer {
                 ..Default::default()
             }, 
             false, 
-            albedo_frag::ty::Specular_Data {
+            albedo_frag::ty::USpecularData {
                 intensity,
                 shininess,
             },
@@ -351,7 +351,7 @@ impl MeshRenderer {
     }
     
     /// Sets the ambient light to use for rendering
-    pub fn set_ambient(&mut self, light: AmbientLight) {
+    pub fn set_ambient_light(&mut self, light: AmbientLight) {
         self.ambient_light_buf = Some(CpuAccessibleBuffer::from_data(
             &self.buffer_allocator, 
             BufferUsage {
@@ -359,7 +359,7 @@ impl MeshRenderer {
                 ..Default::default()
             }, 
             false, 
-            ambient_frag::ty::Ambient_Light_Data {
+            ambient_frag::ty::UAmbientLightData {
                 color: light.color.into(),
                 intensity: light.intensity.into(),
             },
@@ -450,7 +450,7 @@ impl MeshRenderer {
 
         let unlit_subbuffer = {
             let (model_mat, normal_mat) = object.transform.get_rendering_matrices();
-            let uniform_data = albedo_vert::ty::Model_Data {
+            let uniform_data = albedo_vert::ty::UModelData {
                 model: model_mat.into(),
                 normals: normal_mat.into(),
             };

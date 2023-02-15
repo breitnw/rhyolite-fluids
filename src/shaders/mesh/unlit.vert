@@ -3,12 +3,12 @@
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec3 color;
 
-layout(set = 0, binding = 0) uniform VP_Data {
+layout(set = 0, binding = 0) uniform UCamData {
     mat4 view;
     mat4 projection;
 } vp_uniforms;
 
-layout(set = 1, binding = 0) uniform Model_Data {
+layout(set = 1, binding = 0) uniform UModelData {
     mat4 model;
 } model_uniforms;
 

@@ -1,6 +1,7 @@
 use std::mem::MaybeUninit;
 use std::sync::Arc;
 
+use vulkano::buffer::cpu_pool::CpuBufferPoolSubbuffer;
 use vulkano::descriptor_set::WriteDescriptorSet;
 use vulkano::device::Device;
 use vulkano::format::Format;
@@ -18,7 +19,6 @@ use vulkano::pipeline::{GraphicsPipeline, PipelineBindPoint, Pipeline};
 use crate::camera::Camera;
 use crate::geometry::dummy::DummyVertex;
 use crate::lighting::{PointLight, AmbientLight};
-use crate::shaders::marched_frag::ty::Point_Light;
 use crate::shaders::{ShaderModulePair, marched_vert, marched_frag};
 use crate::{geometry::MarchedObject, shaders::{ambient_frag, point_frag, albedo_vert}};
 
@@ -32,10 +32,11 @@ pub struct MarchedRenderer {
     buffer_allocator: Arc<GenericMemoryAllocator<Arc<FreeListAllocator>>>,
     descriptor_set_allocator: StandardDescriptorSetAllocator,
 
-    ambient_light_buf: Option<Arc<CpuAccessibleBuffer<ambient_frag::ty::Ambient_Light_Data>>>,
-    point_light_buf_pool: CpuBufferPool<marched_frag::ty::Light_Data>,
+    ambient_light_buf: Option<Arc<CpuAccessibleBuffer<ambient_frag::ty::UAmbientLightData>>>,
+    point_light_buf_pool: CpuBufferPool<marched_frag::ty::UPointLightData>,
+    point_light_buf: Arc<CpuBufferPoolSubbuffer<marched_frag::ty::UPointLightData>>,
     // albedo_buf_pool: CpuBufferPool<albedo_vert::ty::Model_Data>,
-    vp_buf_pool: CpuBufferPool<albedo_vert::ty::VP_Data>,
+    vp_buf_pool: CpuBufferPool<albedo_vert::ty::UCamData>,
 
     vp_set: Option<Arc<PersistentDescriptorSet>>,
 
@@ -45,7 +46,6 @@ pub struct MarchedRenderer {
     dummy_vertices: Arc<CpuAccessibleBuffer<[DummyVertex]>>,
 
     objects: Vec<MarchedObject>,
-    point_lights: Vec<PointLight>,
     ambient_light: AmbientLight,
 }
 
@@ -54,10 +54,7 @@ impl MarchedRenderer {
         let mut base = RenderBase::new(&event_loop);
 
         let render_pass = get_render_pass(&base.device, base.swapchain.image_format());
-        let shaders = ShaderModulePair {
-            vert: marched_vert::load(base.device.clone()).unwrap(),
-            frag: marched_frag::load(base.device.clone()).unwrap(),
-        };
+        let shaders = ShaderModulePair::marched_default(&base.device);
 
         // Render pipelines
         let pipeline = GraphicsPipeline::start()
@@ -79,9 +76,16 @@ impl MarchedRenderer {
 
         // Buffers and buffer pools
         let ambient_light_buf = None;
-        let point_light_buf_pool = CpuBufferPool::<marched_frag::ty::Light_Data>::uniform_buffer(buffer_allocator.clone());
+        let point_light_buf_pool = CpuBufferPool::<marched_frag::ty::UPointLightData>::uniform_buffer(buffer_allocator.clone());
         // let albedo_buf_pool = CpuBufferPool::<albedo_vert::ty::Model_Data>::uniform_buffer(buffer_allocator.clone());
-        let vp_buf_pool = CpuBufferPool::<albedo_vert::ty::VP_Data>::uniform_buffer(buffer_allocator.clone());
+        let vp_buf_pool = CpuBufferPool::<albedo_vert::ty::UCamData>::uniform_buffer(buffer_allocator.clone());
+
+        let point_light_buf = point_light_buf_pool.from_data(
+            marched_frag::ty::UPointLightData {
+                data: unsafe { get_point_light_arr::<16>(&Vec::new()) },
+                len: 0
+            }
+        ).unwrap();
 
         // Includes framebuffers and other attachments that aren't stored
         let framebuffers = window_size_dependent_setup(
@@ -113,7 +117,8 @@ impl MarchedRenderer {
             descriptor_set_allocator,
 
             ambient_light_buf, 
-            point_light_buf_pool, 
+            point_light_buf_pool,
+            point_light_buf, 
             // albedo_buf_pool, 
             vp_buf_pool, 
 
@@ -125,7 +130,6 @@ impl MarchedRenderer {
             dummy_vertices,
 
             objects: Vec::new(),
-            point_lights: Vec::new(),
             ambient_light,
         }
     }
@@ -159,46 +163,15 @@ impl MarchedRenderer {
     pub fn finish(&mut self) {
         if self.base.render_error { return; }
 
-        // Add point lights to the scene
-        self.point_lights = vec![
-            PointLight::new(nalgebra_glm::vec3(0.0, 10.0, -10.0), 40.0, [0.0, 0.2, 1.0]),
-            PointLight::new(nalgebra_glm::vec3(0.0, -10.0, 10.0), 40.0, [1.0, 0.2, 0.0])
-        ];
-
-        let point_lights: Vec<Point_Light> = self.point_lights.iter().map(|light| {
-            let position = light.get_position();
-            let position_arr = [position.x, position.y, position.z, 0.0];
-            marched_frag::ty::Point_Light{
-                position: position_arr.into(),
-                color: *light.get_color(),
-                intensity: light.get_intensity(),
-            }
-        }).collect();
-
-        let mut uninit_array: MaybeUninit<[Point_Light; 16]> = MaybeUninit::uninit();
-        let mut ptr_i = uninit_array.as_mut_ptr() as *mut Point_Light;
-        let point_lights_arr : [Point_Light; 16] = unsafe {
-            for i in 0..point_lights.len() {
-                let value_i = i;
-                ptr_i.write(point_lights[i]);
-                ptr_i = ptr_i.add(1);
-            }
-            uninit_array.assume_init()
-        };
-
-        let point_light_buf = self.point_light_buf_pool.from_data(
-            marched_frag::ty::Light_Data {
-                point: point_lights_arr,
-                point_len: point_lights.len() as i32
-            }
-        ).unwrap();
-
         // Create the descriptor sets and draw to the scene
         let layout = self.pipeline.layout().set_layouts().get(1).unwrap().clone();
-        let set = PersistentDescriptorSet::new(
+        let lighting_set = PersistentDescriptorSet::new(
             &self.descriptor_set_allocator,
             layout.clone(),
-            [WriteDescriptorSet::buffer(0, point_light_buf)]
+            [
+                WriteDescriptorSet::buffer(0, self.point_light_buf.clone()), 
+                WriteDescriptorSet::buffer(1, self.ambient_light_buf.as_ref().expect("No ambient light added").clone())
+            ]
         ).unwrap();
         
         self.base.commands_mut()
@@ -207,7 +180,7 @@ impl MarchedRenderer {
                 PipelineBindPoint::Graphics, 
                 self.pipeline.layout().clone(), 
                 0,
-                (self.vp_set.as_ref().unwrap().clone(), set)
+                (self.vp_set.as_ref().unwrap().clone(), lighting_set)
             )
             .bind_vertex_buffers(0, self.dummy_vertices.clone())
             .draw(self.dummy_vertices.len() as u32, 1, 0, 0)
@@ -216,16 +189,34 @@ impl MarchedRenderer {
         self.base.finish();
     }
 
-    fn add_object(&mut self, object: &mut MarchedObject) {
-
+    pub fn add_object(&mut self, object: &mut MarchedObject) {
+        todo!()
     }
 
-    fn add_point_light(&mut self, point_light: &mut PointLight) {
-        
+    /// Adds point lights to the scene. Unlike in the mesh renderer, these point lights will persist between frames, so there's no need to re-add them unless their positions have been changed. 
+    pub fn set_point_lights(&mut self, point_lights: &Vec<PointLight>) {
+        self.point_light_buf = self.point_light_buf_pool.from_data(
+            marched_frag::ty::UPointLightData {
+                data: unsafe { get_point_light_arr::<16>(&point_lights) },
+                len: point_lights.len() as i32
+            }
+        ).unwrap();
     } 
 
-    fn set_ambient(&mut self, ambient_light: AmbientLight) {
-        
+    /// Sets the ambient light to use for rendering
+    pub fn set_ambient_light(&mut self, light: AmbientLight) {
+        self.ambient_light_buf = Some(CpuAccessibleBuffer::from_data(
+            &self.buffer_allocator, 
+            BufferUsage {
+                uniform_buffer: true,
+                ..Default::default()
+            }, 
+            false, 
+            ambient_frag::ty::UAmbientLightData {
+                color: light.color.into(),
+                intensity: light.intensity.into(),
+            },
+        ).unwrap())
     }
 
     /// Updates the aspect ratio of the camera. Should be called when the window is resized
@@ -287,4 +278,29 @@ pub(crate) fn get_render_pass(device: &Arc<Device>, final_format: Format) -> Arc
             depth_stencil: {}
         }
     ).unwrap()
+}
+
+unsafe fn get_point_light_arr<const MAX_LEN: usize>(point_lights: &Vec<PointLight>) -> [marched_frag::ty::UPointLight; MAX_LEN] {
+    let mut uninit_array: MaybeUninit<[marched_frag::ty::UPointLight; MAX_LEN]> = MaybeUninit::uninit();
+    let mut ptr_i = uninit_array.as_mut_ptr() as *mut marched_frag::ty::UPointLight;
+
+    if point_lights.len() > MAX_LEN { panic!("Only {} point lights may be added to the scene at one time", MAX_LEN) }
+    
+    for i in 0..point_lights.len() {
+        let light = &point_lights[i];
+        let position = light.get_position();
+        let position_arr = [position.x, position.y, position.z, 0.0];
+        let u_light = marched_frag::ty::UPointLight {
+            position: position_arr.into(),
+            color: *light.get_color(),
+            intensity: light.get_intensity(),
+        };
+        unsafe {
+            ptr_i.write(u_light);
+            ptr_i = ptr_i.add(1);
+        }
+    }
+    unsafe {
+        uninit_array.assume_init()
+    }
 }

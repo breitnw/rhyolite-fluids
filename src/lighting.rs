@@ -3,7 +3,7 @@ use std::sync::Arc;
 use nalgebra_glm::Vec3;
 use vulkano::buffer::{CpuBufferPool, cpu_pool::CpuBufferPoolSubbuffer};
 
-use crate::shaders::point_frag::ty::Point_Light_Data;
+use crate::shaders::point_frag::ty::UPointLightData;
 
 #[derive(Default, Debug, Clone)]
 pub struct AmbientLight {
@@ -14,7 +14,7 @@ pub struct PointLight {
     position: Vec3,
     intensity: f32,
     color: [f32; 3],
-    buffer: Option<Arc<CpuBufferPoolSubbuffer<Point_Light_Data>>>,
+    buffer: Option<Arc<CpuBufferPoolSubbuffer<UPointLightData>>>,
 }
 
 
@@ -48,13 +48,13 @@ impl PointLight {
     }
     pub(crate) fn get_buffer(
         &mut self,
-        pool: &CpuBufferPool<Point_Light_Data>,
-    ) -> Arc<CpuBufferPoolSubbuffer<Point_Light_Data>> {
+        pool: &CpuBufferPool<UPointLightData>,
+    ) -> Arc<CpuBufferPoolSubbuffer<UPointLightData>> {
         let position_arr = [self.position.x, self.position.y, self.position.z, 0.0];
         if let Some(buffer) = self.buffer.as_ref() {
             return buffer.clone();
         } else {
-            let uniform_data = Point_Light_Data {
+            let uniform_data = UPointLightData {
                 position: position_arr.into(),
                 intensity: self.intensity,
                 color: self.color.into(),

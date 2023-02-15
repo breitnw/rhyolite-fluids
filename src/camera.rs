@@ -22,7 +22,7 @@ pub struct Camera {
 struct CameraPostConfig {
     aspect_ratio: f32,
     projection: TMat4<f32>,
-    vp_subbuffer: Option<Arc<CpuBufferPoolSubbuffer<albedo_vert::ty::VP_Data>>>,
+    vp_subbuffer: Option<Arc<CpuBufferPoolSubbuffer<albedo_vert::ty::UCamData>>>,
 }// :)
 
 impl Camera {
@@ -92,13 +92,13 @@ impl Camera {
         &self.transform
     }
 
-    pub(crate) fn get_vp_subbuffer(&mut self, vp_buffer_pool: &CpuBufferPool<albedo_vert::ty::VP_Data>) 
-    -> Result<Arc<CpuBufferPoolSubbuffer<albedo_vert::ty::VP_Data>>, UnconfiguredError> {
+    pub(crate) fn get_vp_subbuffer(&mut self, vp_buffer_pool: &CpuBufferPool<albedo_vert::ty::UCamData>) 
+    -> Result<Arc<CpuBufferPoolSubbuffer<albedo_vert::ty::UCamData>>, UnconfiguredError> {
         if self.needs_vp_update {
             self.needs_vp_update = false;
             self.view = self.transform.get_rendering_matrices().0.try_inverse().unwrap();
             self.get_post_config_mut()?.vp_subbuffer = Some(vp_buffer_pool.from_data(
-                albedo_vert::ty::VP_Data {
+                albedo_vert::ty::UCamData {
                     view: self.view.into(),
                     projection: self.get_post_config()?.projection.into(),
                 },

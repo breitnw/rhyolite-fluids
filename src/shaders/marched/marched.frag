@@ -4,26 +4,26 @@
 
 layout(location = 0) in vec2 uv;
 
-layout(set = 0, binding = 0) uniform VP_Data {
+layout(set = 0, binding = 0) uniform UCamData {
     mat4 view;
     mat4 projection;
 } vp_uniforms;
 
-// layout(set = 0, binding = 1) uniform Ambient_Light_Data {
-//     vec3 color;
-//     float intensity;
-// } ambient_light;
-
-struct Point_Light {
+struct UPointLight {
     vec4 position;
     vec3 color;
     float intensity;
 };
 
-layout(set = 1, binding = 0) uniform Light_Data {
-    Point_Light point[MAX_POINT_LIGHTS];
-    int point_len;
-} lights;
+layout(set = 1, binding = 0) uniform UPointLightData {
+    UPointLight data[MAX_POINT_LIGHTS];
+    int len;
+} point_lights;
+
+layout(set = 1, binding = 1) uniform UAmbientLightData {
+    vec3 color;
+    float intensity;
+} ambient_light;
 
 layout(location = 0) out vec4 out_color;
 
@@ -63,7 +63,7 @@ vec3 get_normal(in vec3 p) {
     return normalize(normal);
 }
 
-vec3 phong(in vec3 frag_pos, in Point_Light light, in vec3 cam_pos) {
+vec3 phong(in vec3 frag_pos, in UPointLight light, in vec3 cam_pos) {
     const float specular_intensity = 1.0;
     const float specular_shininess = 64.0;
 
@@ -88,8 +88,8 @@ vec3 phong(in vec3 frag_pos, in Point_Light light, in vec3 cam_pos) {
 
 vec3 get_lighting(in vec3 frag_pos, in vec3 cam_pos) {
     vec3 out_color = vec3(0.0);
-    for (int i = 0; i < lights.point_len; i++) {
-        out_color += phong(frag_pos, lights.point[i], cam_pos);
+    for (int i = 0; i < point_lights.len; i++) {
+        out_color += phong(frag_pos, point_lights.data[i], cam_pos);
     }
     return out_color;
 }

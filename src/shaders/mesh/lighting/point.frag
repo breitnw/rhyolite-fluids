@@ -9,7 +9,7 @@ layout(input_attachment_index = 1, set = 1, binding = 1) uniform subpassInput u_
 layout(input_attachment_index = 2, set = 1, binding = 2) uniform subpassInput u_frag_pos;
 layout(input_attachment_index = 3, set = 1, binding = 3) uniform subpassInput u_specular;
 
-layout(set = 1, binding = 4) uniform Point_Light_Data {
+layout(set = 1, binding = 4) uniform UPointLightData {
     vec4 position;
     vec3 color;
     float intensity;
