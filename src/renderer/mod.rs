@@ -24,7 +24,6 @@ pub mod mesh;
 pub mod marched;
 
 pub trait Renderer {
-    type Object;
     fn recreate_swapchain_and_buffers(&mut self);
 }
 

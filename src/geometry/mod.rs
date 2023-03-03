@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use nalgebra_glm::Vec3;
 use vulkano::{buffer::{CpuAccessibleBuffer, BufferUsage}, memory::allocator::MemoryAllocator};
 
 use crate::{transform::Transform, UnconfiguredError};
@@ -12,13 +13,19 @@ vulkano::impl_vertex!(UnlitVertex, position, color);
 
 pub mod dummy;
 use dummy::DummyVertex;
+
+use self::loader::ModelBuilder;
 vulkano::impl_vertex!(DummyVertex, position);
+
+pub mod marched;
 
 
 /// Contains data that can only be generated after being configured with the Rhyolite instance
 struct ObjectPostConfig {
     vertex_buffer: Arc<CpuAccessibleBuffer<[BasicVertex]>>,
 }
+
+/// An object, containing vertices and other data, that is rendered as a mesh. 
 pub struct MeshObject {
     vertices: Option<Vec<BasicVertex>>,
     pub transform: Transform,
@@ -29,7 +36,7 @@ pub struct MeshObject {
 }
 
 impl MeshObject {
-    pub fn new(transform: Transform, vertices: Vec<BasicVertex>, specular_intensity: f32, shininess: f32) -> Self {
+    pub(crate) fn new(transform: Transform, vertices: Vec<BasicVertex>, specular_intensity: f32, shininess: f32) -> Self {
         Self {
             vertices: Some(vertices),
             transform,
@@ -39,7 +46,7 @@ impl MeshObject {
         }
     }
 
-    pub fn configure(&mut self, vb_allocator: &(impl MemoryAllocator + ?Sized)) {
+    pub(crate) fn configure(&mut self, vb_allocator: &(impl MemoryAllocator + ?Sized)) {
         let vertex_buffer = CpuAccessibleBuffer::from_iter(
             vb_allocator, 
             BufferUsage {
@@ -65,8 +72,18 @@ impl MeshObject {
     pub(crate) fn get_specular(&self) -> (f32, f32) {
         (self.specular_intensity, self.shininess)
     }
-}
 
-pub struct MarchedObject {
-    // TODO: implement, move to another file
+    pub fn from_file(
+        path: &'static str, 
+        translate: &Vec3, 
+        scale: &Vec3, 
+        color: &Vec3,
+        specular: (f32, f32),
+    ) -> MeshObject {
+        let vertices = ModelBuilder::from_file(path, true).build_basic([color.x, color.y, color.z]);
+        let mut object_transform = Transform::zero();
+        object_transform.set_translation(translate);
+        object_transform.set_scale(scale);
+        MeshObject::new(object_transform, vertices, specular.0, specular.1)
+    }
 }

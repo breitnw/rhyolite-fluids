@@ -1,6 +1,8 @@
 #version 450
 
 #define MAX_POINT_LIGHTS 16
+#define MAX_METABALLS 1024
+#define BLEND_FACTOR 2.0
 
 layout(location = 0) in vec2 uv;
 
@@ -11,7 +13,7 @@ layout(set = 0, binding = 0) uniform UCamData {
 
 struct UPointLight {
     vec4 position;
-    vec3 color;
+    vec4 color;
     float intensity;
 };
 
@@ -21,9 +23,20 @@ layout(set = 1, binding = 0) uniform UPointLightData {
 } point_lights;
 
 layout(set = 1, binding = 1) uniform UAmbientLightData {
-    vec3 color;
+    vec4 color;
     float intensity;
 } ambient_light;
+
+struct UMetaball {
+    vec4 position;
+    vec4 color;
+    float radius;
+};
+
+layout(set = 2, binding = 0) uniform UMetaballData {
+    UMetaball data[MAX_METABALLS];
+    int len;
+} metaballs;
 
 layout(location = 0) out vec4 out_color;
 
@@ -40,14 +53,10 @@ float distance_from_sphere(in vec3 p, in vec3 c, float r) {
 float map_the_world(in vec3 p) {
     float fx = 0.0;
     float fy = 0.0;
-    float result = distance_from_sphere(p, vec3(0.0), 0.1);
-    for (int x = 0; x < 9; x++) {
-        for (int y = 0; y < 9; y++) {
-            result = smin(result, distance_from_sphere(p, vec3(fx, .0, fy), 0.45), 2.0);
-            fy += 2.0;
-        }
-        fx += 2.0;
-        fy = 0.0;
+    float result = 32767.0;
+    for (int i = 0; i < metaballs.len; i++) {
+        UMetaball metaball = metaballs.data[i];
+        result = smin(result, distance_from_sphere(p, metaball.position.xyz, metaball.radius), BLEND_FACTOR);
     }
     return result;
     
@@ -83,7 +92,7 @@ vec3 phong(in vec3 frag_pos, in UPointLight light, in vec3 cam_pos) {
         specular = pow(spec_angle, specular_shininess);
     }
 
-    return (lambertian + specular) * light.color * light.intensity / dist_squared;
+    return (lambertian + specular) * light.color.rgb * light.intensity / dist_squared;
 }
 
 vec3 get_lighting(in vec3 frag_pos, in vec3 cam_pos) {
@@ -91,7 +100,7 @@ vec3 get_lighting(in vec3 frag_pos, in vec3 cam_pos) {
     for (int i = 0; i < point_lights.len; i++) {
         out_color += phong(frag_pos, point_lights.data[i], cam_pos);
     }
-    out_color += ambient_light.color * ambient_light.intensity;
+    out_color += ambient_light.color.rgb * ambient_light.intensity;
     return out_color;
 }
 

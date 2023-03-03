@@ -11,7 +11,7 @@ layout(input_attachment_index = 3, set = 1, binding = 3) uniform subpassInput u_
 
 layout(set = 1, binding = 4) uniform UPointLightData {
     vec4 position;
-    vec3 color;
+    vec4 color;
     float intensity;
 } light;
 
@@ -40,7 +40,7 @@ void main() {
         specular = pow(specAngle, specular_shininess);
     }
 
-    vec3 light_color = (lambertian * light.color + specular * light.color) * light.intensity / dist_squared;
+    vec3 light_color = (lambertian * light.color.rgb + specular * light.color.rgb) * light.intensity / dist_squared;
 
     f_color = vec4(subpassLoad(u_color).rgb * light_color, 1.0);
 }

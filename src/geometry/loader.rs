@@ -143,7 +143,7 @@ impl ModelBuilder {
                     position: self.vertices[verts[i]].to_arr(),
                     normal: self.normals[norms[i]].to_arr(),
                     color: custom_color,
-                })
+                });
             }
         };
         result

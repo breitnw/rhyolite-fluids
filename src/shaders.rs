@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use nalgebra_glm::Vec3;
 use vulkano::{shader::ShaderModule, device::Device};
 
 pub mod albedo_vert {
@@ -93,8 +94,8 @@ pub mod marched_frag {
             use bytemuck::{Pod, Zeroable};
             #[derive(Clone, Copy, Zeroable, Pod)]
         },
-    } 
-} 
+    }
+}
 
 // TODO: find a better way to do this
 
@@ -139,3 +140,9 @@ impl Shaders {
         }
     }
 }
+
+/// A utility function to convert from a vec3 to a f32 array with length 4. Meant to aid with byte alignment for
+/// descriptor sets. 
+pub(crate) fn expand_vec3(vec3: &Vec3) -> [f32; 4] {
+    return [vec3.x, vec3.y, vec3.z, 0.0];
+} 

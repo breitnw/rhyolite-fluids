@@ -2,7 +2,7 @@ use crate::UnconfiguredError;
 use crate::geometry::MeshObject;
 use crate::geometry::dummy::DummyVertex;
 use crate::geometry::loader::BasicVertex;
-use crate::shaders::{albedo_vert, point_frag, ambient_frag, Shaders, unlit_vert, albedo_frag};
+use crate::shaders::{albedo_vert, point_frag, ambient_frag, Shaders, unlit_vert, albedo_frag, expand_vec3};
 use crate::lighting::{AmbientLight, PointLight};
 use crate::camera::Camera;
 
@@ -360,7 +360,7 @@ impl MeshRenderer {
             }, 
             false, 
             ambient_frag::ty::UAmbientLightData {
-                color: light.color.into(),
+                color: expand_vec3(&light.color),
                 intensity: light.intensity.into(),
             },
         ).unwrap())
@@ -499,8 +499,6 @@ impl MeshRenderer {
 
 
 impl Renderer for MeshRenderer {
-    type Object = MeshObject;
-
     fn recreate_swapchain_and_buffers(&mut self) {
         self.base.recreate_swapchain();
         // TODO: use a different allocator?

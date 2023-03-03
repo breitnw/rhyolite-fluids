@@ -1,6 +1,7 @@
 use std::mem::MaybeUninit;
 use std::sync::Arc;
 
+use nalgebra_glm::vec3;
 use vulkano::buffer::cpu_pool::CpuBufferPoolSubbuffer;
 use vulkano::descriptor_set::WriteDescriptorSet;
 use vulkano::device::Device;
@@ -18,11 +19,15 @@ use vulkano::pipeline::{GraphicsPipeline, PipelineBindPoint, Pipeline};
 
 use crate::camera::Camera;
 use crate::geometry::dummy::DummyVertex;
+use crate::geometry::marched::Metaball;
 use crate::lighting::{PointLight, AmbientLight};
-use crate::shaders::{ShaderModulePair, marched_vert, marched_frag};
-use crate::{geometry::MarchedObject, shaders::{ambient_frag, point_frag, albedo_vert}};
+use crate::shaders::{ShaderModulePair, marched_frag, expand_vec3};
+use crate::shaders::{ambient_frag, albedo_vert};
 
 use super::{Renderer, RenderBase};
+
+const MAX_POINT_LIGHTS: usize = 16;
+const MAX_METABALLS: usize = 1024;
 
 pub struct MarchedRenderer {
     base: RenderBase,
@@ -35,7 +40,8 @@ pub struct MarchedRenderer {
     ambient_light_buf: Option<Arc<CpuAccessibleBuffer<ambient_frag::ty::UAmbientLightData>>>,
     point_light_buf_pool: CpuBufferPool<marched_frag::ty::UPointLightData>,
     point_light_buf: Arc<CpuBufferPoolSubbuffer<marched_frag::ty::UPointLightData>>,
-    // albedo_buf_pool: CpuBufferPool<albedo_vert::ty::Model_Data>,
+    metaball_buf_pool: CpuBufferPool<marched_frag::ty::UMetaballData>,
+    metaball_buf: Arc<CpuBufferPoolSubbuffer<marched_frag::ty::UMetaballData>>,
     vp_buf_pool: CpuBufferPool<albedo_vert::ty::UCamData>,
 
     vp_set: Option<Arc<PersistentDescriptorSet>>,
@@ -45,7 +51,7 @@ pub struct MarchedRenderer {
 
     dummy_vertices: Arc<CpuAccessibleBuffer<[DummyVertex]>>,
 
-    objects: Vec<MarchedObject>,
+    objects: Vec<Metaball>,
     ambient_light: AmbientLight,
 }
 
@@ -77,12 +83,19 @@ impl MarchedRenderer {
         // Buffers and buffer pools
         let ambient_light_buf = None;
         let point_light_buf_pool = CpuBufferPool::<marched_frag::ty::UPointLightData>::uniform_buffer(buffer_allocator.clone());
-        // let albedo_buf_pool = CpuBufferPool::<albedo_vert::ty::Model_Data>::uniform_buffer(buffer_allocator.clone());
+        let metaball_buf_pool = CpuBufferPool::<marched_frag::ty::UMetaballData>::uniform_buffer(buffer_allocator.clone());
         let vp_buf_pool = CpuBufferPool::<albedo_vert::ty::UCamData>::uniform_buffer(buffer_allocator.clone());
 
         let point_light_buf = point_light_buf_pool.from_data(
             marched_frag::ty::UPointLightData {
-                data: unsafe { get_point_light_arr::<16>(&Vec::new()) },
+                data: unsafe { to_partially_init_arr::<MAX_POINT_LIGHTS, marched_frag::ty::UPointLight>(&Vec::new()) },
+                len: 0
+            }
+        ).unwrap();
+
+        let metaball_buf = metaball_buf_pool.from_data(
+            marched_frag::ty::UMetaballData {
+                data: unsafe { to_partially_init_arr::<MAX_METABALLS, marched_frag::ty::UMetaball>(&Vec::new()) },
                 len: 0
             }
         ).unwrap();
@@ -106,7 +119,7 @@ impl MarchedRenderer {
         ).unwrap();
 
         let ambient_light = AmbientLight {
-            color: [1.0, 1.0, 1.0],
+            color: vec3(1.0, 1.0, 1.0),
             intensity: 0.4, 
         };
 
@@ -119,7 +132,8 @@ impl MarchedRenderer {
             ambient_light_buf, 
             point_light_buf_pool,
             point_light_buf, 
-            // albedo_buf_pool, 
+            metaball_buf_pool,
+            metaball_buf,
             vp_buf_pool, 
 
             vp_set: None, 
@@ -131,6 +145,7 @@ impl MarchedRenderer {
 
             objects: Vec::new(),
             ambient_light,
+            
         }
     }
 
@@ -164,6 +179,7 @@ impl MarchedRenderer {
         if self.base.render_error { return; }
 
         // Create the descriptor sets and draw to the scene
+        // TODO: don't remake lighting set every frame
         let layout = self.pipeline.layout().set_layouts().get(1).unwrap().clone();
         let lighting_set = PersistentDescriptorSet::new(
             &self.descriptor_set_allocator,
@@ -173,6 +189,13 @@ impl MarchedRenderer {
                 WriteDescriptorSet::buffer(1, self.ambient_light_buf.as_ref().expect("No ambient light added").clone())
             ]
         ).unwrap();
+        let layout = self.pipeline.layout().set_layouts().get(2).unwrap().clone();
+        let geometry_set = PersistentDescriptorSet::new(
+            &self.descriptor_set_allocator, 
+            layout.clone(), [
+                WriteDescriptorSet::buffer(0, self.metaball_buf.clone())
+            ]
+        ).unwrap();
         
         self.base.commands_mut()
             .bind_pipeline_graphics(self.pipeline.clone())
@@ -180,7 +203,7 @@ impl MarchedRenderer {
                 PipelineBindPoint::Graphics, 
                 self.pipeline.layout().clone(), 
                 0,
-                (self.vp_set.as_ref().unwrap().clone(), lighting_set)
+                (self.vp_set.as_ref().unwrap().clone(), lighting_set, geometry_set)
             )
             .bind_vertex_buffers(0, self.dummy_vertices.clone())
             .draw(self.dummy_vertices.len() as u32, 1, 0, 0)
@@ -189,15 +212,37 @@ impl MarchedRenderer {
         self.base.finish();
     }
 
-    pub fn add_object(&mut self, object: &mut MarchedObject) {
-        todo!()
+    /// Adds metaball objects to the scene. These objects will persist between frames, so there's no need to re-add them unless their positions have been changed.  
+    pub fn set_objects(&mut self, objects: &Vec<Metaball>) {
+        let objects: Vec<marched_frag::ty::UMetaball> = objects.iter().map(|obj| {
+            marched_frag::ty::UMetaball {
+                position: expand_vec3(obj.get_position()),
+                color: expand_vec3(obj.get_color()),
+                radius: obj.get_radius(), 
+                _dummy0: [0; 12],
+            }
+        }).collect();
+        self.metaball_buf = self.metaball_buf_pool.from_data(
+            marched_frag::ty::UMetaballData {
+                data: unsafe { to_partially_init_arr::<MAX_METABALLS, marched_frag::ty::UMetaball>(&objects) },
+                len: objects.len() as i32
+            }
+        ).unwrap();
     }
 
     /// Adds point lights to the scene. Unlike in the mesh renderer, these point lights will persist between frames, so there's no need to re-add them unless their positions have been changed. 
     pub fn set_point_lights(&mut self, point_lights: &Vec<PointLight>) {
+        let point_lights: Vec<marched_frag::ty::UPointLight> = point_lights.iter().map(|light| {
+            marched_frag::ty::UPointLight {
+                position: expand_vec3(light.get_position()),
+                color: expand_vec3(light.get_color()),
+                intensity: light.get_intensity(),
+                _dummy0: [0; 12],
+            }
+        }).collect();
         self.point_light_buf = self.point_light_buf_pool.from_data(
             marched_frag::ty::UPointLightData {
-                data: unsafe { get_point_light_arr::<16>(&point_lights) },
+                data: unsafe { to_partially_init_arr::<MAX_POINT_LIGHTS, marched_frag::ty::UPointLight>(&point_lights) },
                 len: point_lights.len() as i32
             }
         ).unwrap();
@@ -213,8 +258,8 @@ impl MarchedRenderer {
             }, 
             false, 
             ambient_frag::ty::UAmbientLightData {
-                color: light.color.into(),
-                intensity: light.intensity.into(),
+                color: expand_vec3(&light.color),
+                intensity: light.intensity,
             },
         ).unwrap())
     }
@@ -226,8 +271,6 @@ impl MarchedRenderer {
 }
 
 impl Renderer for MarchedRenderer {
-    type Object = MarchedObject;
-
     fn recreate_swapchain_and_buffers(&mut self) {
         self.base.recreate_swapchain();
         // TODO: use a different allocator?
@@ -280,22 +323,14 @@ pub(crate) fn get_render_pass(device: &Arc<Device>, final_format: Format) -> Arc
     ).unwrap()
 }
 
-unsafe fn get_point_light_arr<const MAX_LEN: usize>(point_lights: &Vec<PointLight>) -> [marched_frag::ty::UPointLight; MAX_LEN] {
-    let mut uninit_array: MaybeUninit<[marched_frag::ty::UPointLight; MAX_LEN]> = MaybeUninit::uninit();
-    let mut ptr_i = uninit_array.as_mut_ptr() as *mut marched_frag::ty::UPointLight;
+unsafe fn to_partially_init_arr<const MAX_LEN: usize, T: Copy>(values: &Vec<T>) -> [T; MAX_LEN] {
+    let mut uninit_array: MaybeUninit<[T; MAX_LEN]> = MaybeUninit::uninit();
+    let mut ptr_i = uninit_array.as_mut_ptr() as *mut T;
 
-    if point_lights.len() > MAX_LEN { panic!("Only {} point lights may be added to the scene at one time", MAX_LEN) }
+    if values.len() > MAX_LEN { panic!("Only {} point lights may be added to the scene at one time", MAX_LEN) }
     
-    for i in 0..point_lights.len() {
-        let light = &point_lights[i];
-        let position = light.get_position();
-        let position_arr = [position.x, position.y, position.z, 0.0];
-        let u_light = marched_frag::ty::UPointLight {
-            position: position_arr.into(),
-            color: *light.get_color(),
-            intensity: light.get_intensity(),
-        };
-        ptr_i.write(u_light);
+    for val in values {
+        ptr_i.write(*val);
         ptr_i = ptr_i.add(1);
     }
     uninit_array.assume_init()
