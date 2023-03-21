@@ -27,7 +27,7 @@ struct CameraPostConfig {
 
 impl Camera {
     /// Creates a new camera with a specified transform, FOV, and clipping planes.
-    /// * `transform`: The transform to create the camera with, ignoring the scale field.
+    /// * `transform`: The transform to create the camera with, ignoring scale.
     /// * `fovy`: The camera's vertical field of view.
     /// * `near_clipping_plane`: The nearest distance at which geometry will clip out of view.
     /// * `far_clipping_plane`: The farthest distance at which geometry will clip out of view.

@@ -48,6 +48,9 @@ impl Transform {
     pub fn get_translation(&self) -> Vec3 {
         vec3(self.translation[12], self.translation[13], self.translation[14])
     }
+    pub fn get_rotation_mat(&self) -> Mat4 {
+        self.rotation
+    }
 
     /// Gets the model and normal transformation matrices
     pub fn get_rendering_matrices(&mut self) -> (TMat4<f32>, TMat4<f32>) {
