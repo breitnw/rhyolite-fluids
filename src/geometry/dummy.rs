@@ -1,20 +1,34 @@
-use bytemuck::{Zeroable, Pod};
+use vulkano::buffer::BufferContents;
+use vulkano::pipeline::graphics::vertex_input::Vertex;
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
+#[derive(Vertex, Clone, Copy, Debug, BufferContents)]
 pub(crate) struct DummyVertex {
-    pub position: [f32; 2]
+    #[format(R32G32_SFLOAT)]
+    pub position: [f32; 2],
 }
 
 impl DummyVertex {
     pub fn list() -> [DummyVertex; 6] {
         [
-            DummyVertex { position: [-1.0, -1.0] },
-            DummyVertex { position: [-1.0, 1.0] },
-            DummyVertex { position: [1.0, 1.0] },
-            DummyVertex { position: [-1.0, -1.0] },
-            DummyVertex { position: [1.0, 1.0] },
-            DummyVertex { position: [1.0, -1.0] }
+            DummyVertex {
+                position: [-1.0, -1.0],
+            },
+            DummyVertex {
+                position: [-1.0, 1.0],
+            },
+            DummyVertex {
+                position: [1.0, 1.0],
+            },
+            DummyVertex {
+                position: [-1.0, -1.0],
+            },
+            DummyVertex {
+                position: [1.0, 1.0],
+            },
+            DummyVertex {
+                position: [1.0, -1.0],
+            },
         ]
     }
 }

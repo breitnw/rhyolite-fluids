@@ -1,68 +1,110 @@
 #![allow(dead_code)]
 
-
-
 use std::time::Instant;
 
-use renderer::{Renderer, marched::MarchedRenderer, mesh::MeshRenderer};
-use winit::{event_loop::{EventLoop, ControlFlow, EventLoopWindowTarget}, event::{Event, WindowEvent}};
+use crate::input::Keyboard;
+use renderer::{/*marched::MarchedRenderer,*/ mesh::MeshRenderer, Renderer};
+use winit::{
+    event::{Event, WindowEvent},
+    event_loop::{ControlFlow, EventLoop, EventLoopWindowTarget},
+};
 
+pub mod camera;
+pub mod geometry;
+pub mod input;
+pub mod lighting;
+pub mod renderer;
 pub mod shaders;
 pub mod transform;
-pub mod geometry;
-pub mod lighting;
-pub mod camera;
-pub mod renderer;
 
+// TODO: figure out why GPU usage is so high compared to before
 
 // TODO: implement frames in flight if not implemented in the tutorial
 // TODO: replace PersistentDescriptorSet instances with a type expected to be shorter-lived
 
-/// The base struct of all Rhyolite operations. 
+/// The base struct of all Rhyolite operations.
 pub struct Rhyolite<T: Renderer> {
     pub renderer: T,
     event_loop: Option<EventLoop<()>>,
 }
 
 impl Rhyolite<MeshRenderer> {
-    /// Creates a new Rhyolite mesh renderer with a specified Winit event loop. 
+    /// Creates a new Rhyolite mesh renderer with a specified Winit event loop.
     pub fn mesh() -> Rhyolite<MeshRenderer> {
         let event_loop = EventLoop::new();
         let renderer = MeshRenderer::new(&event_loop);
-        Rhyolite { renderer, event_loop: Some(event_loop) }
+        Rhyolite {
+            renderer,
+            event_loop: Some(event_loop),
+        }
     }
 }
 
-impl Rhyolite<MarchedRenderer> {
-    /// Creates a new Rhyolite ray marched renderer with a specified Winit event loop. 
-    pub fn ray_marched() -> Rhyolite<MarchedRenderer> {
-        let event_loop = EventLoop::new();
-        let renderer = MarchedRenderer::new(&event_loop);
-        Rhyolite { renderer, event_loop: Some(event_loop) }
-    }
-}
+// impl Rhyolite<MarchedRenderer> {
+//     /// Creates a new Rhyolite ray marched renderer with a specified Winit event loop.
+//     pub fn ray_marched() -> Rhyolite<MarchedRenderer> {
+//         let event_loop = EventLoop::new();
+//         let renderer = MarchedRenderer::new(&event_loop);
+//         Rhyolite {
+//             renderer,
+//             event_loop: Some(event_loop),
+//         }
+//     }
+// }
 
 impl<T: Renderer + 'static> Rhyolite<T> {
-
     /// Runs a FnMut closure with the Rhyolite instance. Events for program exiting, swapchain recreation on resize, and TimeState calculation are executed before
-    /// the closure is called. 
+    /// the closure is called.
     pub fn run<F>(mut self, mut handler: F)
-    where F: 'static + FnMut(Event<'_, ()>, &EventLoopWindowTarget<()>, &mut ControlFlow, &TimeState, &mut T) {
+    where
+        F: 'static
+            + FnMut(
+                Event<'_, ()>,
+                &Keyboard,
+                &EventLoopWindowTarget<()>,
+                &mut ControlFlow,
+                &TimeState,
+                &mut T,
+            ),
+    {
         let mut time_state = TimeState::new();
+        let mut keyboard = Keyboard::new();
 
-        self.event_loop.take().unwrap().run(move |event, target, control_flow| {
-            match event {
-                Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
-                    *control_flow = ControlFlow::Exit;
+        self.event_loop
+            .take()
+            .unwrap()
+            .run(move |event, target, control_flow| {
+                match event {
+                    Event::WindowEvent {
+                        event: WindowEvent::CloseRequested,
+                        ..
+                    } => {
+                        *control_flow = ControlFlow::Exit;
+                    }
+                    Event::WindowEvent {
+                        event: WindowEvent::Resized(_),
+                        ..
+                    } => {
+                        self.renderer.recreate_swapchain_and_framebuffers();
+                    }
+                    Event::WindowEvent {
+                        event: WindowEvent::KeyboardInput { input, .. },
+                        ..
+                    } => {
+                        keyboard.update_with_input(input);
+                    }
+                    Event::RedrawEventsCleared => time_state.update(),
+                    _ => (),
                 }
-                Event::WindowEvent { event: WindowEvent::Resized(_), .. } => {
-                    self.renderer.recreate_swapchain_and_buffers();
-                },
-                Event::RedrawEventsCleared => time_state.update(),
-                _ => (),
-            }
-            handler(event, target, control_flow, &time_state, &mut self.renderer);
-        });
+                handler(
+                    event,
+                    &keyboard,
+                    target,
+                    control_flow,
+                    &time_state,
+                    &mut self.renderer,
+                );
+            });
     }
 }
 
@@ -76,7 +118,7 @@ impl std::fmt::Display for UnconfiguredError {
 
 /// A struct representing various time-related values, automatically calculated by Rhyolite before each frame.
 /// * `current`: The amount of time elapsed since the start of the program, in seconds.
-/// * `delta`: The amount of time elapsed since the last frame, in seconds. 
+/// * `delta`: The amount of time elapsed since the last frame, in seconds.
 pub struct TimeState {
     start_instant: Instant,
     pub current: f32,

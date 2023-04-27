@@ -1,20 +1,18 @@
-use std::sync::Arc;
+use nalgebra_glm::{perspective, TMat4};
+use vulkano::buffer::allocator::SubbufferAllocator;
+use vulkano::buffer::Subbuffer;
 
-use nalgebra_glm::{TMat4, perspective};
-use vulkano::buffer::{cpu_pool::CpuBufferPoolSubbuffer, CpuBufferPool};
-use winit::window::Window;
+use crate::{shaders::albedo_vert, transform::Transform, UnconfiguredError};
 
-use crate::{transform::Transform, shaders::albedo_vert, UnconfiguredError};
 pub struct Camera {
     transform: Transform,
 
     view: TMat4<f32>,
-    fovy: f32, 
-    near_clipping_plane: f32, 
+    fovy: f32,
+    near_clipping_plane: f32,
     far_clipping_plane: f32,
 
-    needs_vp_update: bool,
-    needs_pos_update: bool,
+    needs_update: bool,
 
     post_config: Option<CameraPostConfig>,
 }
@@ -22,8 +20,7 @@ pub struct Camera {
 struct CameraPostConfig {
     aspect_ratio: f32,
     projection: TMat4<f32>,
-    vp_subbuffer: Option<Arc<CpuBufferPoolSubbuffer<albedo_vert::ty::UCamData>>>,
-}// :)
+} // :)
 
 impl Camera {
     /// Creates a new camera with a specified transform, FOV, and clipping planes.
@@ -33,8 +30,8 @@ impl Camera {
     /// * `far_clipping_plane`: The farthest distance at which geometry will clip out of view.
     pub fn new(
         mut transform: Transform,
-        fovy: f32, 
-        near_clipping_plane: f32, 
+        fovy: f32,
+        near_clipping_plane: f32,
         far_clipping_plane: f32,
     ) -> Self {
         Camera {
@@ -43,34 +40,39 @@ impl Camera {
             fovy,
             near_clipping_plane,
             far_clipping_plane,
-            needs_vp_update: true,
-            needs_pos_update: true,
+            needs_update: true,
             post_config: None,
         }
     }
 
-    /// Configures the camera's aspect ratio based on the window size. Needs to be run before the camera can be used.
-    pub fn configure(&mut self, window: &Window) {
-        let dimensions: [i32; 2] = window.inner_size().into();
+    /// Configures the camera's aspect ratio. Needs to be run before the camera can be used.
+    pub fn configure(&mut self, dimensions: [i32; 2]) {
         let aspect_ratio = dimensions[0] as f32 / dimensions[1] as f32;
-        let projection = perspective(aspect_ratio, self.fovy, self.near_clipping_plane, self.far_clipping_plane);
-        
-        self.needs_vp_update = true;
-        self.needs_pos_update = true;
+        let projection = perspective(
+            aspect_ratio,
+            self.fovy,
+            self.near_clipping_plane,
+            self.far_clipping_plane,
+        );
+
+        self.needs_update = true;
 
         self.post_config = Some(CameraPostConfig {
             aspect_ratio,
             projection,
-            vp_subbuffer: None,
         });
     }
 
     fn get_post_config(&self) -> Result<&CameraPostConfig, UnconfiguredError> {
-        self.post_config.as_ref().ok_or(UnconfiguredError("Camera not yet configured. Do so with `Camera::configure()` before accessing projection matrix"))
+        self.post_config.as_ref().ok_or(
+            UnconfiguredError("Camera not yet configured. Do so with `Camera::configure()` before accessing projection matrix")
+        )
     }
 
     fn get_post_config_mut(&mut self) -> Result<&mut CameraPostConfig, UnconfiguredError> {
-        self.post_config.as_mut().ok_or(UnconfiguredError("Camera not yet configured. Do so with `Camera::configure()` before accessing projection matrix"))
+        self.post_config.as_mut().ok_or(UnconfiguredError(
+            "Camera not yet configured. Do so with `Camera::configure()` before accessing projection matrix")
+        )
     }
 
     pub(crate) fn is_configured(&self) -> bool {
@@ -78,32 +80,45 @@ impl Camera {
     }
 
     /// Gets a mutable reference to the camera's transform.
-    /// 
-    /// Calling this function forces the camera's subbuffers to be updated at the end of the frame, so only use it when it's 
-    /// necessary to move the camera. 
+    ///
+    /// Calling this function forces the camera's subbuffers to be updated at the end of the frame,
+    /// so only use it when it's necessary to move the camera.
     pub fn transform_mut(&mut self) -> &mut Transform {
-        self.needs_vp_update = true;
-        self.needs_pos_update = true;
+        self.needs_update = true;
         &mut self.transform
     }
 
-    /// Gets an immutable reference to the camera's transform. 
+    /// Gets an immutable reference to the camera's transform.
     pub fn transform(&self) -> &Transform {
         &self.transform
     }
 
-    pub(crate) fn get_vp_subbuffer(&mut self, vp_buffer_pool: &CpuBufferPool<albedo_vert::ty::UCamData>) 
-    -> Result<Arc<CpuBufferPoolSubbuffer<albedo_vert::ty::UCamData>>, UnconfiguredError> {
-        if self.needs_vp_update {
-            self.needs_vp_update = false;
-            self.view = self.transform.get_rendering_matrices().0.try_inverse().unwrap();
-            self.get_post_config_mut()?.vp_subbuffer = Some(vp_buffer_pool.from_data(
-                albedo_vert::ty::UCamData {
-                    view: self.view.into(),
-                    projection: self.get_post_config()?.projection.into(),
-                },
-            ).unwrap());
+    /// Returns a subbuffer containing the camera's view and projection data as required for
+    /// rendering. Allocates from a `SubbufferAllocator`.
+    pub(crate) fn get_vp_subbuffer(
+        &mut self,
+        subbuffer_allocator: &SubbufferAllocator,
+    ) -> Result<Subbuffer<albedo_vert::UCamData>, UnconfiguredError> {
+        if self.needs_update {
+            self.needs_update = false;
+            self.view = self
+                .transform
+                .get_rendering_matrices()
+                .0
+                .try_inverse()
+                .unwrap();
         }
-        Ok(self.get_post_config()?.vp_subbuffer.as_ref().unwrap().clone())
+
+        let buf = subbuffer_allocator
+            .allocate_sized::<albedo_vert::UCamData>()
+            .unwrap();
+        let mut write_guard = buf.write().unwrap();
+        *write_guard = albedo_vert::UCamData {
+            view: self.view.into(),
+            projection: self.get_post_config()?.projection.into(),
+        };
+        drop(write_guard);
+
+        Ok(buf)
     }
 }

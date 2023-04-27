@@ -1,31 +1,29 @@
 use std::sync::Arc;
-
 use nalgebra_glm::Vec3;
-use vulkano::{buffer::{CpuAccessibleBuffer, BufferUsage}, memory::allocator::MemoryAllocator};
+use vulkano::buffer::{Buffer, BufferCreateInfo, Subbuffer};
+use vulkano::memory::allocator::{AllocationCreateInfo, MemoryUsage};
+use vulkano::{buffer::BufferUsage, memory::allocator::MemoryAllocator};
+use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
+use vulkano::device::Queue;
 
 use crate::{transform::Transform, UnconfiguredError};
 
 pub mod loader;
 use loader::BasicVertex;
-use loader::UnlitVertex;
-vulkano::impl_vertex!(BasicVertex, position, normal, color);
-vulkano::impl_vertex!(UnlitVertex, position, color);
+use crate::renderer::staging::StagingBuffer;
 
 pub mod dummy;
-use dummy::DummyVertex;
 
 use self::loader::ModelBuilder;
-vulkano::impl_vertex!(DummyVertex, position);
 
 pub mod marched;
 
-
 /// Contains data that can only be generated after being configured with the Rhyolite instance
 struct ObjectPostConfig {
-    vertex_buffer: Arc<CpuAccessibleBuffer<[BasicVertex]>>,
+    vertex_buffer: Subbuffer<[BasicVertex]>,
 }
 
-/// An object, containing vertices and other data, that is rendered as a mesh. 
+/// An object, containing vertices and other data, that is rendered as a mesh.
 pub struct MeshObject {
     vertices: Option<Vec<BasicVertex>>,
     pub transform: Transform,
@@ -36,7 +34,12 @@ pub struct MeshObject {
 }
 
 impl MeshObject {
-    pub(crate) fn new(transform: Transform, vertices: Vec<BasicVertex>, specular_intensity: f32, shininess: f32) -> Self {
+    pub(crate) fn new(
+        transform: Transform,
+        vertices: Vec<BasicVertex>,
+        specular_intensity: f32,
+        shininess: f32,
+    ) -> Self {
         Self {
             vertices: Some(vertices),
             transform,
@@ -46,26 +49,44 @@ impl MeshObject {
         }
     }
 
-    pub(crate) fn configure(&mut self, vb_allocator: &(impl MemoryAllocator + ?Sized)) {
-        let vertex_buffer = CpuAccessibleBuffer::from_iter(
-            vb_allocator, 
-            BufferUsage {
-                vertex_buffer: true,
+    pub(crate) fn configure(
+        &mut self,
+        buffer_allocator: &(impl MemoryAllocator + ?Sized),
+        command_buffer_allocator: &StandardCommandBufferAllocator,
+        transfer_queue: Arc<Queue>
+    ) {
+        let vertex_buffer = Buffer::from_iter(
+            buffer_allocator,
+            BufferCreateInfo {
+                usage: BufferUsage::TRANSFER_SRC,
                 ..Default::default()
-            }, 
-            false,
-            self.vertices.take().expect("Object already configured").into_iter(),
-        ).unwrap();
-        self.post_config = Some(ObjectPostConfig {
-            vertex_buffer
-        });
+            },
+            AllocationCreateInfo {
+                usage: MemoryUsage::Upload,
+                ..Default::default()
+            },
+            self.vertices
+                .take()
+                .expect("Object already configured")
+                .into_iter(),
+        )
+            .unwrap()
+            .into_device_local(
+                buffer_allocator,
+                BufferUsage::VERTEX_BUFFER,
+                command_buffer_allocator,
+                transfer_queue.clone()
+            );
+        self.post_config = Some(ObjectPostConfig { vertex_buffer });
     }
 
     fn get_post_config(&self) -> Result<&ObjectPostConfig, UnconfiguredError> {
-        self.post_config.as_ref().ok_or(UnconfiguredError("Object not properly configured"))
+        self.post_config
+            .as_ref()
+            .ok_or(UnconfiguredError("Object not properly configured"))
     }
 
-    pub(crate) fn get_vertex_buffer(&self) -> Result<&Arc<CpuAccessibleBuffer<[BasicVertex]>>, UnconfiguredError> {
+    pub(crate) fn get_vertex_buffer(&self) -> Result<&Subbuffer<[BasicVertex]>, UnconfiguredError> {
         Ok(&self.get_post_config()?.vertex_buffer)
     }
 
@@ -74,9 +95,9 @@ impl MeshObject {
     }
 
     pub fn from_file(
-        path: &'static str, 
-        translate: &Vec3, 
-        scale: &Vec3, 
+        path: &'static str,
+        translate: &Vec3,
+        scale: &Vec3,
         color: &Vec3,
         specular: (f32, f32),
     ) -> MeshObject {

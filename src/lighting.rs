@@ -1,66 +1,120 @@
 use std::sync::Arc;
-
 use nalgebra_glm::Vec3;
-use vulkano::buffer::{CpuBufferPool, cpu_pool::CpuBufferPoolSubbuffer};
+use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage, Subbuffer};
+use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
+use vulkano::device::Queue;
+use vulkano::memory::allocator::{AllocationCreateInfo, MemoryAllocator, MemoryUsage};
 
-use crate::shaders::{point_frag::ty::UPointLightData, expand_vec3};
+use crate::shaders::{ambient_frag, expand_vec3, point_frag};
+use crate::renderer::staging::StagingBuffer;
 
-#[derive(Default, Debug, Clone)]
+// TODO: ideally make the get_buffer thing a trait
+
+#[derive(Default, Clone)]
 pub struct AmbientLight {
-    pub color: Vec3,
-    pub intensity: f32,
-}
-pub struct PointLight {
-    position: Vec3,
-    intensity: f32,
     color: Vec3,
-    buffer: Option<Arc<CpuBufferPoolSubbuffer<UPointLightData>>>,
+    intensity: f32,
+    subbuffer: Option<Subbuffer<ambient_frag::UAmbientLightData>>
 }
 
-
-// TODO: changing light data at runtime might not work
-impl PointLight {
-    pub fn new(position: Vec3, intensity: f32, color: Vec3) -> Self {
+impl AmbientLight {
+    pub fn new(color: Vec3, intensity: f32) -> Self {
         Self {
-            position,
+            color,
             intensity,
-            color, 
-            buffer: None,
+            subbuffer: None,
         }
     }
-    pub fn set_position(&mut self, position: Vec3) {
-        self.position = position;
-    }
-    pub fn get_position(&self) -> &Vec3 {
-        &self.position
-    }
-    pub fn set_color(&mut self, color: Vec3) {
-        self.color = color;
-    }
-    pub fn get_color(&self) -> &Vec3 {
-        &self.color
-    }
-    pub fn set_intensity(&mut self, intensity: f32) {
-        self.intensity = intensity;
-    }
-    pub fn get_intensity(&self) -> f32 {
-        self.intensity
-    }
+
     pub(crate) fn get_buffer(
         &mut self,
-        pool: &CpuBufferPool<UPointLightData>,
-    ) -> Arc<CpuBufferPoolSubbuffer<UPointLightData>> {
-        if let Some(buffer) = self.buffer.as_ref() {
-            return buffer.clone();
+        buffer_allocator: &(impl MemoryAllocator + ?Sized),
+        command_buffer_allocator: &StandardCommandBufferAllocator,
+        transfer_queue: Arc<Queue>
+    ) -> Subbuffer<ambient_frag::UAmbientLightData> {
+        return if let Some(buffer) = self.subbuffer.as_ref() {
+            buffer.clone()
         } else {
-            let uniform_data = UPointLightData {
-                position: expand_vec3(&self.position),
-                intensity: self.intensity,
-                color: expand_vec3(&self.color),
-            };
-            let buffer = pool.from_data(uniform_data).unwrap();
-            self.buffer = Some(buffer.clone());
-            return buffer;
+            let buf = Buffer::from_data(
+                buffer_allocator,
+                BufferCreateInfo {
+                    usage: BufferUsage::TRANSFER_SRC,
+                    ..Default::default()
+                },
+                AllocationCreateInfo {
+                    usage: MemoryUsage::Upload,
+                    ..Default::default()
+                },
+                ambient_frag::UAmbientLightData {
+                    color: expand_vec3(&self.color),
+                    intensity: self.intensity.into(),
+                }
+            )
+                .unwrap()
+                .into_device_local(
+                    buffer_allocator,
+                    BufferUsage::UNIFORM_BUFFER,
+                    command_buffer_allocator,
+                    transfer_queue.clone()
+                );
+            self.subbuffer = Some(buf.clone());
+            buf
+        }
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct PointLight {
+    position: Vec3,
+    color: Vec3,
+    intensity: f32,
+    subbuffer: Option<Subbuffer<point_frag::UPointLightData>>
+}
+
+impl PointLight {
+    pub fn new(position: Vec3, color: Vec3, intensity: f32) -> Self {
+        Self {
+            position,
+            color,
+            intensity,
+            subbuffer: None,
+        }
+    }
+
+    pub(crate) fn get_buffer(
+        &mut self,
+        buffer_allocator: &(impl MemoryAllocator + ?Sized),
+        command_buffer_allocator: &StandardCommandBufferAllocator,
+        transfer_queue: Arc<Queue>
+    ) -> Subbuffer<point_frag::UPointLightData> {
+        return if let Some(buffer) = self.subbuffer.as_ref() {
+            buffer.clone()
+        } else {
+            let buf = Buffer::from_data(
+                buffer_allocator,
+                BufferCreateInfo {
+                    usage: BufferUsage::TRANSFER_SRC,
+                    ..Default::default()
+                },
+                AllocationCreateInfo {
+                    usage: MemoryUsage::Upload,
+                    ..Default::default()
+                },
+                point_frag::UPointLightData {
+                    position: expand_vec3(&self.position),
+                    color: expand_vec3(&self.color),
+                    intensity: self.intensity.into(),
+                }
+            )
+                .unwrap()
+                .into_device_local(
+                    buffer_allocator,
+                    BufferUsage::UNIFORM_BUFFER,
+                    command_buffer_allocator,
+                    transfer_queue.clone()
+                );
+            self.subbuffer = Some(buf.clone());
+            buf
         }
     }
 }

@@ -3,15 +3,12 @@ name = "rhyolite"
 version = "0.0.1"
 authors = ["breitnw"]
 edition = "2021"
-description = "A lightweight game engine built on Vulkan"
+description = "A lightweight rendering engine built on Vulkan"
 license = "MIT"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-vulkano = "0.32.1"
-vulkano-win = "0.32.0"
-vulkano-shaders = "0.32.0"
-winit = "0.27.5"
-bytemuck = "1.12.3"
-nalgebra-glm = "0.17.0"
+vulkano = "0.33.0"
+vulkano-win = "0.33.0"
+vulkano-shaders = "0.33.0"
+nalgebra-glm = "0.18.0"
+winit = "0.28"

@@ -1,6 +1,6 @@
-use nalgebra_glm::{TMat4, inverse_transpose, identity, Vec3, translate, scale, Mat4, vec3};
+use nalgebra_glm::{identity, inverse_transpose, scale, translate, vec3, Mat4, TMat4, Vec3};
 
-pub struct Transform{
+pub struct Transform {
     model: TMat4<f32>,
     normals: TMat4<f32>,
     translation: TMat4<f32>,
@@ -11,7 +11,7 @@ pub struct Transform{
 
 impl Transform {
     pub fn zero() -> Self {
-        Self{
+        Self {
             model: identity(),
             normals: identity(),
             translation: identity(),
@@ -46,7 +46,11 @@ impl Transform {
     }
 
     pub fn get_translation(&self) -> Vec3 {
-        vec3(self.translation[12], self.translation[13], self.translation[14])
+        vec3(
+            self.translation[12],
+            self.translation[13],
+            self.translation[14],
+        )
     }
     pub fn get_rotation_mat(&self) -> Mat4 {
         self.rotation
