@@ -110,14 +110,12 @@ impl Camera {
         }
 
         let buf = subbuffer_allocator
-            .allocate_sized::<albedo_vert::UCamData>()
+            .allocate_sized()
             .unwrap();
-        let mut write_guard = buf.write().unwrap();
-        *write_guard = albedo_vert::UCamData {
+        *buf.write().unwrap() = albedo_vert::UCamData {
             view: self.view.into(),
             projection: self.get_post_config()?.projection.into(),
         };
-        drop(write_guard);
 
         Ok(buf)
     }

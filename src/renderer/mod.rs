@@ -16,10 +16,7 @@ use vulkano::instance::{Instance, InstanceCreateInfo};
 use vulkano::library::VulkanLibrary;
 use vulkano::pipeline::graphics::viewport::Viewport;
 use vulkano::render_pass::Framebuffer;
-use vulkano::swapchain::{
-    AcquireError, Surface, Swapchain, SwapchainAcquireFuture, SwapchainCreateInfo,
-    SwapchainCreationError, SwapchainPresentInfo,
-};
+use vulkano::swapchain::{AcquireError, CompositeAlpha, Surface, Swapchain, SwapchainAcquireFuture, SwapchainCreateInfo, SwapchainCreationError, SwapchainPresentInfo};
 use vulkano::sync::{FlushError, GpuFuture};
 use vulkano::Version;
 use vulkano_win;
@@ -78,7 +75,8 @@ impl RenderBase {
         let window = Arc::from(
             WindowBuilder::new()
                 .with_title("Vulkan Window")
-                .with_inner_size(LogicalSize::new(300, 300))
+                .with_inner_size(LogicalSize::new(250, 250))
+                // .with_inner_size(LogicalSize::new(1280, 720))
                 .build(event_loop)
                 .unwrap(),
         );
@@ -345,6 +343,7 @@ fn find_queue_families(
             queue_families.push(family as u32);
         } else { return None }
     }
+    dbg!(&queue_families);
     queue_families.sort();
     queue_families.dedup();
     Some(queue_families)

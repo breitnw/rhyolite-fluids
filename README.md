@@ -2,7 +2,7 @@
 An in-progress, bare-bones rendering engine built with Vulkano.
 
 Rhyolite is built first and foremost as a personal project and a renderer for my fluid simulation research, but it can be used for all sorts of 
-applications! Currently, it's able load and render .obj files, both unlit and lit. Unlit models are rendered entirely with a chosen albedo color,
+applications! Currently, it's able to load and render .obj files, both unlit and lit. Unlit models are rendered entirely with a chosen albedo color,
 while lit models are shaded with Phong shading. To light models, Rhyolite offers point and directional lights, each with controllable color and 
 brightness parameters.
 

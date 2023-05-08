@@ -35,7 +35,6 @@ impl<T: BufferContents + ?Sized> StagingBuffer for Subbuffer<T> {
         command_buf_allocator: &StandardCommandBufferAllocator,
         queue: Arc<Queue>,
     ) -> Subbuffer<T> {
-
         let size = self.size();
         let device_local_buf = Buffer::new_unsized::<T>(
             buffer_allocator,
@@ -76,6 +75,8 @@ impl<T: BufferContents + ?Sized> StagingBuffer for Subbuffer<T> {
             .unwrap()
             .wait(None)
             .unwrap();
+
+        println!("Created device-local buffer: {:?}", buffer_usage);
 
         return device_local_buf;
     }

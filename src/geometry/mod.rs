@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use nalgebra_glm::Vec3;
-use vulkano::buffer::{Buffer, BufferCreateInfo, Subbuffer};
+use vulkano::buffer::{Buffer, BufferCreateFlags, BufferCreateInfo, Subbuffer};
 use vulkano::memory::allocator::{AllocationCreateInfo, MemoryUsage};
 use vulkano::{buffer::BufferUsage, memory::allocator::MemoryAllocator};
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;

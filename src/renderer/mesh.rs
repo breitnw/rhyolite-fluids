@@ -34,6 +34,7 @@ use winit::event_loop::EventLoop;
 
 use std::sync::Arc;
 use vulkano::buffer::allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo};
+use vulkano::pipeline;
 
 use super::{RenderBase, Renderer};
 
@@ -105,10 +106,7 @@ pub struct MeshRenderer {
 
     vp_set: Option<Arc<PersistentDescriptorSet>>,
 
-    albedo_pipeline: Arc<GraphicsPipeline>,
-    point_light_pipeline: Arc<GraphicsPipeline>,
-    ambient_light_pipeline: Arc<GraphicsPipeline>,
-    unlit_pipeline: Arc<GraphicsPipeline>,
+    pipelines: Pipelines,
 
     dummy_vertex_buf: Subbuffer<[DummyVertex]>,
 
@@ -122,84 +120,10 @@ impl MeshRenderer {
     pub fn new(event_loop: &EventLoop<()>) -> Self {
         let mut base = RenderBase::new(&event_loop);
 
-        let shaders = Shaders::mesh_default(&base.device);
-
         // Declare the render pass, a structure that lets us define how the rendering process should work. Tells the hardware
         // where it can expect to find input and where it can store output
         let render_pass = get_render_pass(&base.device, base.swapchain.image_format());
-        let albedo_pass = Subpass::from(render_pass.clone(), 0).unwrap();
-        let lighting_pass = Subpass::from(render_pass.clone(), 1).unwrap();
-
-        // Render pipelines
-        let albedo_pipeline = GraphicsPipeline::start()
-            .vertex_input_state(BasicVertex::per_vertex())
-            .vertex_shader(shaders.albedo.vert.entry_point("main").unwrap(), ())
-            .input_assembly_state(InputAssemblyState::new())
-            .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
-            .fragment_shader(shaders.albedo.frag.entry_point("main").unwrap(), ())
-            .depth_stencil_state(DepthStencilState::simple_depth_test())
-            .rasterization_state(RasterizationState::new().cull_mode(CullMode::Back))
-            .render_pass(albedo_pass)
-            .build(base.device.clone())
-            .unwrap();
-
-        let point_light_pipeline = GraphicsPipeline::start()
-            .vertex_input_state(DummyVertex::per_vertex())
-            .vertex_shader(shaders.point.vert.entry_point("main").unwrap(), ())
-            .input_assembly_state(InputAssemblyState::new())
-            .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
-            .fragment_shader(shaders.point.frag.entry_point("main").unwrap(), ())
-            .color_blend_state(
-                ColorBlendState::new(lighting_pass.num_color_attachments()).blend(
-                    AttachmentBlend {
-                        color_op: BlendOp::Add,
-                        color_source: BlendFactor::One,
-                        color_destination: BlendFactor::One,
-                        alpha_op: BlendOp::Max,
-                        alpha_source: BlendFactor::One,
-                        alpha_destination: BlendFactor::One,
-                    },
-                ),
-            )
-            .rasterization_state(RasterizationState::new().cull_mode(CullMode::Back))
-            .render_pass(lighting_pass.clone())
-            .build(base.device.clone())
-            .unwrap();
-
-        let ambient_light_pipeline = GraphicsPipeline::start()
-            .vertex_input_state(DummyVertex::per_vertex())
-            .vertex_shader(shaders.ambient.vert.entry_point("main").unwrap(), ())
-            .input_assembly_state(InputAssemblyState::new())
-            .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
-            .fragment_shader(shaders.ambient.frag.entry_point("main").unwrap(), ())
-            .color_blend_state(
-                ColorBlendState::new(lighting_pass.num_color_attachments()).blend(
-                    AttachmentBlend {
-                        color_op: BlendOp::Add,
-                        color_source: BlendFactor::One,
-                        color_destination: BlendFactor::One,
-                        alpha_op: BlendOp::Max,
-                        alpha_source: BlendFactor::One,
-                        alpha_destination: BlendFactor::One,
-                    },
-                ),
-            )
-            .rasterization_state(RasterizationState::new().cull_mode(CullMode::Back))
-            .render_pass(lighting_pass.clone())
-            .build(base.device.clone())
-            .unwrap();
-
-        let unlit_pipeline = GraphicsPipeline::start()
-            .vertex_input_state(BasicVertex::per_vertex())
-            .vertex_shader(shaders.unlit.vert.entry_point("main").unwrap(), ())
-            .input_assembly_state(InputAssemblyState::new())
-            .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
-            .fragment_shader(shaders.unlit.frag.entry_point("main").unwrap(), ())
-            .depth_stencil_state(DepthStencilState::simple_depth_test())
-            .rasterization_state(RasterizationState::new().cull_mode(CullMode::Back))
-            .render_pass(lighting_pass.clone())
-            .build(base.device.clone())
-            .unwrap();
+        // let pipelines = Pipelines::new(&render_pass, &device);
 
         // Buffer allocators
         // Generic allocator for framebuffer attachments, descriptor sets, vertex buffers, etc.
@@ -214,8 +138,8 @@ impl MeshRenderer {
         let subbuffer_allocator = SubbufferAllocator::new(
             buffer_allocator.clone(),
             SubbufferAllocatorCreateInfo {
-                arena_size: 2048, // TODO: FIND THE ACTUAL VALUE
-                buffer_usage: BufferUsage::TRANSFER_SRC | BufferUsage::UNIFORM_BUFFER,
+                arena_size: 512, // TODO: FIND THE ACTUAL VALUE
+                buffer_usage: BufferUsage::UNIFORM_BUFFER,
                 memory_usage: MemoryUsage::Upload,
                 ..Default::default()
             },
@@ -243,11 +167,12 @@ impl MeshRenderer {
             );
 
         // Includes framebuffers and other attachments that aren't stored
-        let (framebuffers, attachment_buffers) = window_size_dependent_setup(
+        let (framebuffers, attachment_buffers, pipelines) = window_size_dependent_setup(
             &buffer_allocator,
             &base.images,
             render_pass.clone(),
             &mut base.viewport,
+            &base.device,
         );
 
         Self {
@@ -259,10 +184,7 @@ impl MeshRenderer {
 
             vp_set: None,
 
-            albedo_pipeline,
-            point_light_pipeline,
-            ambient_light_pipeline,
-            unlit_pipeline,
+            pipelines,
 
             dummy_vertex_buf,
 
@@ -281,7 +203,8 @@ impl MeshRenderer {
         }
 
         let vp_layout = self
-            .albedo_pipeline
+            .pipelines
+            .albedo
             .layout()
             .set_layouts()
             .get(0)
@@ -330,12 +253,10 @@ impl MeshRenderer {
         let albedo_subbuffer = self.subbuffer_allocator
             .allocate_sized()
             .unwrap();
-        let mut write_guard = albedo_subbuffer.write().unwrap();
-        *write_guard = albedo_vert::UModelData {
+        *albedo_subbuffer.write().unwrap() = albedo_vert::UModelData {
             model: model_mat.into(),
             normals: normal_mat.into(),
         };
-        drop(write_guard);
 
 
         // TODO: Do this with textures instead!!!!!!!!! Not a subbuffer!!!!!!!!!
@@ -345,15 +266,14 @@ impl MeshRenderer {
         let specular_subbuffer = self.subbuffer_allocator
             .allocate_sized()
             .unwrap();
-        let mut write_guard = specular_subbuffer.write().unwrap();
-        *write_guard = albedo_frag::USpecularData {
+        *specular_subbuffer.write().unwrap() = albedo_frag::USpecularData {
             intensity,
             shininess,
         };
-        drop(write_guard);
 
         let albedo_layout = self
-            .albedo_pipeline
+            .pipelines
+            .albedo
             .layout()
             .set_layouts()
             .get(1)
@@ -372,10 +292,10 @@ impl MeshRenderer {
         // Add albedo-related commands to the command buffer
         self.base
             .commands_mut()
-            .bind_pipeline_graphics(self.albedo_pipeline.clone())
+            .bind_pipeline_graphics(self.pipelines.albedo.clone())
             .bind_descriptor_sets(
                 PipelineBindPoint::Graphics,
-                self.albedo_pipeline.layout().clone(),
+                self.pipelines.albedo.layout().clone(),
                 0,
                 (self.vp_set.as_ref().unwrap().clone(), albedo_set.clone()),
             )
@@ -397,7 +317,8 @@ impl MeshRenderer {
         self.render_stage.update(RenderStage::Ambient);
 
         let ambient_layout = self
-            .ambient_light_pipeline
+            .pipelines
+            .ambient
             .layout()
             .set_layouts()
             .get(0)
@@ -422,10 +343,10 @@ impl MeshRenderer {
             .commands_mut()
             .next_subpass(SubpassContents::Inline)
             .unwrap()
-            .bind_pipeline_graphics(self.ambient_light_pipeline.clone())
+            .bind_pipeline_graphics(self.pipelines.ambient.clone())
             .bind_descriptor_sets(
                 PipelineBindPoint::Graphics,
-                self.ambient_light_pipeline.layout().clone(),
+                self.pipelines.ambient.layout().clone(),
                 0,
                 ambient_set.clone(),
             )
@@ -444,7 +365,8 @@ impl MeshRenderer {
         self.render_stage.update(RenderStage::Point);
 
         let point_layout = self
-            .point_light_pipeline
+            .pipelines
+            .point
             .layout()
             .set_layouts()
             .get(1)
@@ -470,10 +392,10 @@ impl MeshRenderer {
 
         self.base
             .commands_mut()
-            .bind_pipeline_graphics(self.point_light_pipeline.clone())
+            .bind_pipeline_graphics(self.pipelines.point.clone())
             .bind_descriptor_sets(
                 PipelineBindPoint::Graphics,
-                self.point_light_pipeline.layout().clone(),
+                self.pipelines.point.layout().clone(),
                 0,
                 (self.vp_set.as_ref().unwrap().clone(), point_set),
             )
@@ -500,12 +422,11 @@ impl MeshRenderer {
         let unlit_subbuffer = self.subbuffer_allocator
             .allocate_sized()
             .unwrap();
-        let mut write_guard = unlit_subbuffer.write().unwrap();
-        *write_guard = uniform_data;
-        drop(write_guard);
+        *unlit_subbuffer.write().unwrap() = uniform_data;
 
         let unlit_layout = self
-            .unlit_pipeline
+            .pipelines
+            .unlit
             .layout()
             .set_layouts()
             .get(1)
@@ -521,10 +442,10 @@ impl MeshRenderer {
         // Add commands to the command buffer
         self.base
             .commands_mut()
-            .bind_pipeline_graphics(self.unlit_pipeline.clone())
+            .bind_pipeline_graphics(self.pipelines.unlit.clone())
             .bind_descriptor_sets(
                 PipelineBindPoint::Graphics,
-                self.unlit_pipeline.layout().clone(),
+                self.pipelines.unlit.layout().clone(),
                 0,
                 (self.vp_set.as_ref().unwrap().clone(), unlit_set.clone()),
             )
@@ -552,14 +473,17 @@ impl Renderer for MeshRenderer {
     fn recreate_swapchain_and_framebuffers(&mut self) {
         self.base.recreate_swapchain();
         // TODO: use a different allocator?
-        let (framebuffers, attachment_buffers) = window_size_dependent_setup(
-            &self.buffer_allocator,
-            &self.base.images,
-            self.render_pass.clone(),
-            &mut self.base.viewport,
-        );
+        let (framebuffers, attachment_buffers, pipelines) =
+            window_size_dependent_setup(
+                &self.buffer_allocator,
+                &self.base.images,
+                self.render_pass.clone(),
+                &mut self.base.viewport,
+                &self.base.device
+            );
         self.framebuffers = framebuffers;
         self.attachment_buffers = attachment_buffers;
+        self.pipelines = pipelines;
     }
 
     fn base(&self) -> &RenderBase {
@@ -580,7 +504,8 @@ fn window_size_dependent_setup(
     images: &[Arc<SwapchainImage>],
     render_pass: Arc<RenderPass>,
     viewport: &mut Viewport,
-) -> (Vec<Arc<Framebuffer>>, AttachmentBuffers) {
+    device: &Arc<Device>,
+) -> (Vec<Arc<Framebuffer>>, AttachmentBuffers, Pipelines) {
     let dimensions = images[0].dimensions().width_height();
     viewport.dimensions = [dimensions[0] as f32, dimensions[1] as f32];
 
@@ -649,7 +574,130 @@ fn window_size_dependent_setup(
         frag_pos_buffer: frag_pos_buffer.clone(),
         specular_buffer: specular_buffer.clone(),
     };
-    (framebuffers, attachment_buffers)
+
+    let pipelines = Pipelines::new(&render_pass, dimensions, device);
+
+    (framebuffers, attachment_buffers, pipelines)
+}
+
+pub struct Pipelines {
+    albedo: Arc<GraphicsPipeline>,
+    point: Arc<GraphicsPipeline>,
+    ambient: Arc<GraphicsPipeline>,
+    unlit: Arc<GraphicsPipeline>,
+}
+
+impl Pipelines {
+    pub fn new(render_pass: &Arc<RenderPass>, dimensions: [u32; 2], device: &Arc<Device>) -> Self {
+        let shaders = Shaders::mesh_default(device);
+
+        // Declare the render pass, a structure that lets us define how the rendering process should work. Tells the hardware
+        // where it can expect to find input and where it can store output
+        let albedo_pass = Subpass::from(render_pass.clone(), 0).unwrap();
+        let lighting_pass = Subpass::from(render_pass.clone(), 1).unwrap();
+
+        // Render pipelines
+        let albedo = GraphicsPipeline::start()
+            .vertex_input_state(BasicVertex::per_vertex())
+            .vertex_shader(shaders.albedo.vert.entry_point("main").unwrap(), ())
+            .input_assembly_state(InputAssemblyState::new())
+            .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([
+                Viewport {
+                    origin: [0.0, 0.0],
+                    dimensions: [dimensions[0] as f32, dimensions[1] as f32],
+                    depth_range: 0.0..1.0,
+                },
+            ]))
+            .fragment_shader(shaders.albedo.frag.entry_point("main").unwrap(), ())
+            .depth_stencil_state(DepthStencilState::simple_depth_test())
+            .rasterization_state(RasterizationState::new().cull_mode(CullMode::Back))
+            .render_pass(albedo_pass)
+            .build(device.clone())
+            .unwrap();
+
+        let point = GraphicsPipeline::start()
+            .vertex_input_state(DummyVertex::per_vertex())
+            .vertex_shader(shaders.point.vert.entry_point("main").unwrap(), ())
+            .input_assembly_state(InputAssemblyState::new())
+            .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([
+                Viewport {
+                    origin: [0.0, 0.0],
+                    dimensions: [dimensions[0] as f32, dimensions[1] as f32],
+                    depth_range: 0.0..1.0,
+                },
+            ]))
+            .fragment_shader(shaders.point.frag.entry_point("main").unwrap(), ())
+            .color_blend_state(
+                ColorBlendState::new(lighting_pass.num_color_attachments()).blend(
+                    AttachmentBlend {
+                        color_op: BlendOp::Add,
+                        color_source: BlendFactor::One,
+                        color_destination: BlendFactor::One,
+                        alpha_op: BlendOp::Max,
+                        alpha_source: BlendFactor::One,
+                        alpha_destination: BlendFactor::One,
+                    },
+                ),
+            )
+            .rasterization_state(RasterizationState::new().cull_mode(CullMode::Back))
+            .render_pass(lighting_pass.clone())
+            .build(device.clone())
+            .unwrap();
+
+        let ambient = GraphicsPipeline::start()
+            .vertex_input_state(DummyVertex::per_vertex())
+            .vertex_shader(shaders.ambient.vert.entry_point("main").unwrap(), ())
+            .input_assembly_state(InputAssemblyState::new())
+            .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([
+                Viewport {
+                    origin: [0.0, 0.0],
+                    dimensions: [dimensions[0] as f32, dimensions[1] as f32],
+                    depth_range: 0.0..1.0,
+                },
+            ]))
+            .fragment_shader(shaders.ambient.frag.entry_point("main").unwrap(), ())
+            .color_blend_state(
+                ColorBlendState::new(lighting_pass.num_color_attachments()).blend(
+                    AttachmentBlend {
+                        color_op: BlendOp::Add,
+                        color_source: BlendFactor::One,
+                        color_destination: BlendFactor::One,
+                        alpha_op: BlendOp::Max,
+                        alpha_source: BlendFactor::One,
+                        alpha_destination: BlendFactor::One,
+                    },
+                ),
+            )
+            .rasterization_state(RasterizationState::new().cull_mode(CullMode::Back))
+            .render_pass(lighting_pass.clone())
+            .build(device.clone())
+            .unwrap();
+
+        let unlit = GraphicsPipeline::start()
+            .vertex_input_state(BasicVertex::per_vertex())
+            .vertex_shader(shaders.unlit.vert.entry_point("main").unwrap(), ())
+            .input_assembly_state(InputAssemblyState::new())
+            .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([
+                Viewport {
+                    origin: [0.0, 0.0],
+                    dimensions: [dimensions[0] as f32, dimensions[1] as f32],
+                    depth_range: 0.0..1.0,
+                },
+            ]))
+            .fragment_shader(shaders.unlit.frag.entry_point("main").unwrap(), ())
+            .depth_stencil_state(DepthStencilState::simple_depth_test())
+            .rasterization_state(RasterizationState::new().cull_mode(CullMode::Back))
+            .render_pass(lighting_pass.clone())
+            .build(device.clone())
+            .unwrap();
+
+        Self {
+            albedo,
+            point,
+            ambient,
+            unlit,
+        }
+    }
 }
 
 fn get_render_pass(device: &Arc<Device>, final_format: Format) -> Arc<RenderPass> {
