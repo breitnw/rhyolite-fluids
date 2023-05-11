@@ -15,7 +15,7 @@ impl Keyboard {
             released_keys: HashSet::new(),
         }
     }
-    pub(crate) fn update_with_input(&mut self, input: winit::event::KeyboardInput) {
+    pub(crate) fn update_with_input(&mut self, input: &winit::event::KeyboardInput) {
         let keycode = input.virtual_keycode.unwrap();
         if input.state == ElementState::Pressed {
             // Check if the key is already held before inserting to prevent key repeats from registering

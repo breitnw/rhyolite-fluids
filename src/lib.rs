@@ -1,5 +1,8 @@
 #![allow(dead_code)]
 
+extern crate core;
+
+use core::time;
 use std::time::Instant;
 
 use crate::input::Keyboard;
@@ -16,8 +19,6 @@ pub mod lighting;
 pub mod renderer;
 pub mod shaders;
 pub mod transform;
-
-// TODO: figure out why GPU usage is so high compared to before
 
 // TODO: implement frames in flight if not implemented in the tutorial
 // TODO: replace PersistentDescriptorSet instances with a type expected to be shorter-lived
@@ -70,32 +71,40 @@ impl<T: Renderer + 'static> Rhyolite<T> {
         let mut time_state = TimeState::new();
         let mut keyboard = Keyboard::new();
 
+        let mut occluded = false;
+
         self.event_loop
             .take()
             .unwrap()
             .run(move |event, target, control_flow| {
-                match event {
-                    Event::WindowEvent {
-                        event: WindowEvent::CloseRequested,
-                        ..
-                    } => {
-                        *control_flow = ControlFlow::Exit;
-                    }
-                    Event::WindowEvent {
-                        event: WindowEvent::Resized(_),
-                        ..
-                    } => {
-                        self.renderer.recreate_swapchain_and_framebuffers();
-                    }
-                    Event::WindowEvent {
-                        event: WindowEvent::KeyboardInput { input, .. },
-                        ..
-                    } => {
-                        keyboard.update_with_input(input);
+                match &event {
+                    Event::WindowEvent { event, ..} => match event {
+                        WindowEvent::CloseRequested => {
+                            *control_flow = ControlFlow::Exit;
+                        }
+                        WindowEvent::ScaleFactorChanged { .. } => {
+                            self.renderer.recreate_all_size_dependent();
+                        }
+                        WindowEvent::Resized(_) => {
+                            self.renderer.recreate_all_size_dependent();
+                        }
+                        WindowEvent::KeyboardInput { input, .. } => {
+                            keyboard.update_with_input(input);
+                        }
+                        WindowEvent::Occluded(val) => {
+                            occluded = *val;
+                        }
+                        _ => ()
                     }
                     Event::RedrawEventsCleared => time_state.update(),
                     _ => (),
                 }
+
+                if occluded {
+                    std::thread::sleep(time::Duration::from_millis(1000 / 60));
+                    return;
+                }
+
                 handler(
                     event,
                     &keyboard,

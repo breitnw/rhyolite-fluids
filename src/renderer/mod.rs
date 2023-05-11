@@ -31,7 +31,7 @@ pub mod mesh;
 pub(crate) mod staging;
 
 pub trait Renderer {
-    fn recreate_swapchain_and_framebuffers(&mut self);
+    fn recreate_all_size_dependent(&mut self);
     fn base(&self) -> &RenderBase;
     fn get_window_size(&self) -> [i32; 2] {
         self.base().window.inner_size().into()
@@ -101,8 +101,7 @@ impl RenderBase {
         let graphics_queue = find_queue(QueueFlags::GRAPHICS);
         let transfer_queue = find_queue(QueueFlags::TRANSFER);
 
-        dbg!(graphics_queue.queue_family_index());
-        dbg!(transfer_queue.queue_family_index());
+        println!("Queue families:\n\tQueueFlags::GRAPHICS: {}\n\tQueueFlags::TRANSFER: {}", graphics_queue.queue_family_index(), transfer_queue.queue_family_index());
 
         // Create the swapchain, an object which contains a vector of Images used for rendering and information on
         // how to show them to the user
@@ -262,6 +261,7 @@ impl RenderBase {
 
     /// Recreates the swapchain. Should be called if the swapchain is invalidated, such as by a window resize
     fn recreate_swapchain(&mut self) {
+
         let (new_swapchain, new_images) = match self.swapchain.recreate(SwapchainCreateInfo {
             image_extent: self.window.inner_size().into(),
             ..self.swapchain.create_info()
@@ -413,7 +413,7 @@ pub(crate) fn get_device(
             ..Default::default()
         },
     )
-    .unwrap(); // TODO: PANIC AHHHHH
+    .expect("Unable to create logical device!");
 
     (physical_device, device, queues)
 }

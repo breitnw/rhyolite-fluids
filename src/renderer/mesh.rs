@@ -220,7 +220,7 @@ impl MeshRenderer {
 
         if self.base.should_recreate_swapchain {
             camera.configure(self.get_window_size());
-            self.recreate_swapchain_and_framebuffers();
+            self.recreate_all_size_dependent();
         }
 
         self.base.start(&mut self.framebuffers);
@@ -466,7 +466,9 @@ impl MeshRenderer {
 }
 
 impl Renderer for MeshRenderer {
-    fn recreate_swapchain_and_framebuffers(&mut self) {
+    /// Recreates all of the structures dependent on the window size, including the framebuffers,
+    /// attachment buffers, swapchain, and pipelines
+    fn recreate_all_size_dependent(&mut self) {
         self.base.recreate_swapchain();
         // TODO: use a different allocator?
         let (framebuffers, attachment_buffers, pipelines) =
