@@ -16,7 +16,7 @@ use vulkano::instance::{Instance, InstanceCreateInfo};
 use vulkano::library::VulkanLibrary;
 use vulkano::pipeline::graphics::viewport::Viewport;
 use vulkano::render_pass::Framebuffer;
-use vulkano::swapchain::{AcquireError, CompositeAlpha, Surface, Swapchain, SwapchainAcquireFuture, SwapchainCreateInfo, SwapchainCreationError, SwapchainPresentInfo};
+use vulkano::swapchain::{AcquireError, Surface, Swapchain, SwapchainAcquireFuture, SwapchainCreateInfo, SwapchainCreationError, SwapchainPresentInfo};
 use vulkano::sync::{FlushError, GpuFuture};
 use vulkano::Version;
 use vulkano_win;
@@ -74,7 +74,7 @@ impl RenderBase {
 
         let window = Arc::from(
             WindowBuilder::new()
-                .with_title("Vulkan Window")
+                .with_title(env!("CARGO_PKG_NAME"))
                 .with_inner_size(LogicalSize::new(250, 250))
                 // .with_inner_size(LogicalSize::new(1280, 720))
                 .build(event_loop)
@@ -94,13 +94,13 @@ impl RenderBase {
                 physical_device
                     .queue_family_properties()[q.queue_family_index() as usize]
                     .queue_flags
-                    .intersects(queue_flags)
+                    .contains(queue_flags)
             }).unwrap().clone()
         };
-        let transfer_queue = find_queue(QueueFlags::TRANSFER);
-        let graphics_queue = find_queue(QueueFlags::GRAPHICS);
 
-        // TODO: debug whether both queues are created if necessary
+        let graphics_queue = find_queue(QueueFlags::GRAPHICS);
+        let transfer_queue = find_queue(QueueFlags::TRANSFER);
+
         dbg!(graphics_queue.queue_family_index());
         dbg!(transfer_queue.queue_family_index());
 
@@ -286,9 +286,12 @@ impl RenderBase {
     }
 }
 
-// HELPER FUNCTIONS FOR RenderBase CREATION
+// ========================================
+// HELPER FUNCTIONS FOR RENDERBASE CREATION
+// ========================================
 
-/// Selects the best physical device based on the available hardware.
+/// Selects the best physical device based on the available hardware, returning the device and the
+/// indices of the necessary queues
 pub(crate) fn select_physical_device(
     instance: &Arc<Instance>,
     surface: &Arc<Surface>,
@@ -314,22 +317,30 @@ pub(crate) fn select_physical_device(
             _ => 5,
         })
         .unwrap();
+
+    println!(
+        "Using device: {} (type: {:?})",
+        physical_device.properties().device_name,
+        physical_device.properties().device_type,
+    );
+
     (physical_device, queue_families)
 }
+
+// QUEUE FAMILIES
 
 fn find_queue_family(required_flags: QueueFlags, physical_device: Arc<PhysicalDevice>, surface: &Surface) -> Option<usize> {
     physical_device.queue_family_properties()
         .iter()
         .enumerate()
         .find(|&q| {
-            if required_flags.intersects(QueueFlags::GRAPHICS)
-                && !physical_device.surface_support(q.0 as u32, surface).unwrap_or(false) {
-                return false;
+            if required_flags.contains(QueueFlags::GRAPHICS) &&
+                !physical_device.surface_support(q.0 as u32, surface).unwrap_or(false) {
             }
-            q.1.queue_flags.intersects(required_flags)
+            q.1.queue_flags.contains(required_flags)
 
         })
-        .map(|q| q.0)
+        .map(|q| {q.0})
 }
 
 fn find_queue_families(
@@ -343,7 +354,6 @@ fn find_queue_families(
             queue_families.push(family as u32);
         } else { return None }
     }
-    dbg!(&queue_families);
     queue_families.sort();
     queue_families.dedup();
     Some(queue_families)
@@ -354,6 +364,8 @@ pub struct QueueFamilies {
     transfer: u32,
 }
 
+/// Gets the Vulkan instance to use for rendering. May need to be modified based on what extensions
+/// are required or what version is used
 pub(crate) fn get_instance() -> Arc<Instance> {
     let library = VulkanLibrary::new().unwrap();
     let required_extensions = vulkano_win::required_extensions(&*library);
@@ -369,6 +381,7 @@ pub(crate) fn get_instance() -> Arc<Instance> {
     .unwrap()
 }
 
+/// Creates the physical device, logical device, and queues that will be needed for rendering
 pub(crate) fn get_device(
     instance: &Arc<Instance>,
     surface: &Arc<Surface>,
@@ -405,6 +418,7 @@ pub(crate) fn get_device(
     (physical_device, device, queues)
 }
 
+/// Creates a swapchain for the provided surface based on the capabilities of the physical device
 pub(crate) fn get_swapchain(
     physical_device: &Arc<PhysicalDevice>,
     device: &Arc<Device>,

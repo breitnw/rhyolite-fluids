@@ -34,7 +34,6 @@ use winit::event_loop::EventLoop;
 
 use std::sync::Arc;
 use vulkano::buffer::allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo};
-use vulkano::pipeline;
 
 use super::{RenderBase, Renderer};
 
@@ -149,7 +148,7 @@ impl MeshRenderer {
         let dummy_vertex_buf = Buffer::from_iter(
             &buffer_allocator,
             BufferCreateInfo {
-                usage: BufferUsage::TRANSFER_SRC,
+                usage: BufferUsage::TRANSFER_SRC | BufferUsage::VERTEX_BUFFER,
                 ..Default::default()
             },
             AllocationCreateInfo {
@@ -160,10 +159,9 @@ impl MeshRenderer {
         )
             .unwrap()
             .into_device_local(
+                6,
                 &buffer_allocator,
-                BufferUsage::VERTEX_BUFFER,
-                &base.command_buffer_allocator,
-                base.transfer_queue.clone()
+                &base,
             );
 
         // Includes framebuffers and other attachments that aren't stored
@@ -331,8 +329,7 @@ impl MeshRenderer {
                 WriteDescriptorSet::image_view(0, self.attachment_buffers.albedo_buffer.clone()),
                 WriteDescriptorSet::buffer(1, light.get_buffer(
                     &self.buffer_allocator,
-                    &self.base.command_buffer_allocator,
-                    self.base.transfer_queue.clone(),
+                    &self.base
                 )),
             ],
         )
@@ -383,8 +380,7 @@ impl MeshRenderer {
                 WriteDescriptorSet::image_view(3, self.attachment_buffers.specular_buffer.clone()),
                 WriteDescriptorSet::buffer(4, light.get_buffer(
                     &self.buffer_allocator,
-                    &self.base.command_buffer_allocator,
-                    self.base.transfer_queue.clone(),
+                    &self.base
                 )),
             ],
         )
@@ -458,7 +454,7 @@ impl MeshRenderer {
 
     /// Sets up necessary buffers and attaches them to the object
     pub fn configure_object(&self, object: &mut MeshObject) {
-        object.configure(&self.buffer_allocator, &self.base.command_buffer_allocator, self.base.transfer_queue.clone())
+        object.configure(&self.buffer_allocator, &self.base)
     }
 
     fn get_render_stage(&self) -> &RenderStage {

@@ -1,15 +1,13 @@
-use std::sync::Arc;
 use nalgebra_glm::Vec3;
-use vulkano::buffer::{Buffer, BufferCreateFlags, BufferCreateInfo, Subbuffer};
+use vulkano::buffer::{Buffer, BufferCreateInfo, Subbuffer};
 use vulkano::memory::allocator::{AllocationCreateInfo, MemoryUsage};
 use vulkano::{buffer::BufferUsage, memory::allocator::MemoryAllocator};
-use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
-use vulkano::device::Queue;
 
 use crate::{transform::Transform, UnconfiguredError};
 
 pub mod loader;
 use loader::BasicVertex;
+use crate::renderer::RenderBase;
 use crate::renderer::staging::StagingBuffer;
 
 pub mod dummy;
@@ -52,13 +50,13 @@ impl MeshObject {
     pub(crate) fn configure(
         &mut self,
         buffer_allocator: &(impl MemoryAllocator + ?Sized),
-        command_buffer_allocator: &StandardCommandBufferAllocator,
-        transfer_queue: Arc<Queue>
+        render_base: &RenderBase
     ) {
+        let num_vertices = self.vertices.as_ref().map(|v| v.len());
         let vertex_buffer = Buffer::from_iter(
             buffer_allocator,
             BufferCreateInfo {
-                usage: BufferUsage::TRANSFER_SRC,
+                usage: BufferUsage::TRANSFER_SRC | BufferUsage::VERTEX_BUFFER,
                 ..Default::default()
             },
             AllocationCreateInfo {
@@ -72,10 +70,9 @@ impl MeshObject {
         )
             .unwrap()
             .into_device_local(
+                num_vertices.unwrap() as u64,
                 buffer_allocator,
-                BufferUsage::VERTEX_BUFFER,
-                command_buffer_allocator,
-                transfer_queue.clone()
+                render_base,
             );
         self.post_config = Some(ObjectPostConfig { vertex_buffer });
     }

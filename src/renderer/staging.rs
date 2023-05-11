@@ -1,45 +1,49 @@
-use std::sync::Arc;
+
 use vulkano::buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer};
-use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
 use vulkano::command_buffer::{
     AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferInfo, PrimaryCommandBufferAbstract,
 };
-use vulkano::device::Queue;
 use vulkano::memory::allocator::{AllocationCreateInfo, MemoryAllocator, MemoryUsage};
 use vulkano::sync::GpuFuture;
+use crate::renderer::RenderBase;
 
 pub(crate) trait StagingBuffer {
     fn into_device_local(
         self,
+        buffer_len: u64,
         buffer_allocator: &(impl MemoryAllocator + ?Sized),
-        buffer_usage: BufferUsage,
-        command_buf_allocator: &StandardCommandBufferAllocator,
-        queue: Arc<Queue>,
+        render_base: &RenderBase,
     ) -> Self;
 }
 
 impl<T: BufferContents + ?Sized> StagingBuffer for Subbuffer<T> {
-    /// Creates a device local buffer, using this buffer for staging and subsequently executing a command
-    /// buffer to copy its contents into the device local buffer on the GPU. This should only be used for buffers that
-    /// aren't modified very often, such as vertex buffers.
+    /// Creates a device local buffer, using this buffer for staging and subsequently executing a
+    /// command buffer to copy its contents into the device local buffer on the GPU. This should
+    /// only be used for buffers that aren't modified very often, such as vertex buffers.
     ///
-    /// The subbuffer that this is called on should have `BufferUsage::TRANSFER_SRC` in its `buffer_usage`,
-    /// and `MemoryUsage::Upload` in its `AllocationCreateInfo`.
+    /// The subbuffer that this is called on should have `BufferUsage::TRANSFER_SRC` in its
+    /// `buffer_usage`, and `MemoryUsage::Upload` in its `AllocationCreateInfo`. All flags on the
+    /// original buffer except for `BufferUsage::TRANSFER_SRC` will be applied to the device-local
+    /// buffer, and `BufferUsage::TRANSFER_DST` will automatically be added.
     ///
-    /// The queue used must be a member of a queue family with the `VK_QUEUE_TRANSFER_BIT`, but not the
-    /// `VK_QUEUE_GRAPHICS_BIT`.
+    /// The value of `buffer_len` should match the length of the buffer in which this function
+    /// is called. If this function is called on a non-array type, the value of this parameter
+    /// should be set to 1.
+    ///
+    /// # Panics
+    /// - The function will panic if the length passed in through the `buffer_len` parameter is not
+    /// equal to the length of the length of the buffer this function is called on.
     fn into_device_local(
         self,
+        buffer_len: u64,
         buffer_allocator: &(impl MemoryAllocator + ?Sized),
-        buffer_usage: BufferUsage,
-        command_buf_allocator: &StandardCommandBufferAllocator,
-        queue: Arc<Queue>,
+        render_base: &RenderBase,
     ) -> Subbuffer<T> {
-        let size = self.size();
+        let usage = self.buffer().usage().difference(BufferUsage::TRANSFER_SRC);
         let device_local_buf = Buffer::new_unsized::<T>(
             buffer_allocator,
             BufferCreateInfo {
-                usage: BufferUsage::TRANSFER_DST | buffer_usage,
+                usage: BufferUsage::TRANSFER_DST | usage,
                 ..Default::default()
             },
             AllocationCreateInfo {
@@ -47,14 +51,16 @@ impl<T: BufferContents + ?Sized> StagingBuffer for Subbuffer<T> {
                 usage: MemoryUsage::DeviceOnly,
                 ..Default::default()
             },
-            size,
+            buffer_len,
         )
         .unwrap();
 
+        assert_eq!(&self.size(), &device_local_buf.size());
+
         // Create a one-time command to copy between the buffers.
         let mut cbb = AutoCommandBufferBuilder::primary(
-            command_buf_allocator,
-            queue.queue_family_index(),
+            &render_base.command_buffer_allocator,
+            render_base.transfer_queue.queue_family_index(),
             CommandBufferUsage::OneTimeSubmit,
         )
         .unwrap();
@@ -69,14 +75,14 @@ impl<T: BufferContents + ?Sized> StagingBuffer for Subbuffer<T> {
         // Execute the copy command and wait for completion before proceeding.
         cbb.build()
             .unwrap()
-            .execute(queue.clone())
+            .execute(render_base.transfer_queue.clone())
             .unwrap()
             .then_signal_fence_and_flush()
             .unwrap()
             .wait(None)
             .unwrap();
 
-        println!("Created device-local buffer: {:?}", buffer_usage);
+        // println!("Created device-local buffer: {:?}", buffer_usage);
 
         return device_local_buf;
     }

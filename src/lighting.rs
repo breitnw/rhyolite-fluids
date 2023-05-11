@@ -4,6 +4,7 @@ use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage, Subbuffer};
 use vulkano::command_buffer::allocator::StandardCommandBufferAllocator;
 use vulkano::device::Queue;
 use vulkano::memory::allocator::{AllocationCreateInfo, MemoryAllocator, MemoryUsage};
+use crate::renderer::RenderBase;
 
 use crate::shaders::{ambient_frag, expand_vec3, point_frag};
 use crate::renderer::staging::StagingBuffer;
@@ -29,8 +30,7 @@ impl AmbientLight {
     pub(crate) fn get_buffer(
         &mut self,
         buffer_allocator: &(impl MemoryAllocator + ?Sized),
-        command_buffer_allocator: &StandardCommandBufferAllocator,
-        transfer_queue: Arc<Queue>
+        render_base: &RenderBase,
     ) -> Subbuffer<ambient_frag::UAmbientLightData> {
         return if let Some(buffer) = self.subbuffer.as_ref() {
             buffer.clone()
@@ -38,7 +38,7 @@ impl AmbientLight {
             let buf = Buffer::from_data(
                 buffer_allocator,
                 BufferCreateInfo {
-                    usage: BufferUsage::TRANSFER_SRC,
+                    usage: BufferUsage::TRANSFER_SRC | BufferUsage::UNIFORM_BUFFER,
                     ..Default::default()
                 },
                 AllocationCreateInfo {
@@ -52,10 +52,9 @@ impl AmbientLight {
             )
                 .unwrap()
                 .into_device_local(
+                    1,
                     buffer_allocator,
-                    BufferUsage::UNIFORM_BUFFER,
-                    command_buffer_allocator,
-                    transfer_queue.clone()
+                    render_base,
                 );
             self.subbuffer = Some(buf.clone());
             buf
@@ -84,8 +83,7 @@ impl PointLight {
     pub(crate) fn get_buffer(
         &mut self,
         buffer_allocator: &(impl MemoryAllocator + ?Sized),
-        command_buffer_allocator: &StandardCommandBufferAllocator,
-        transfer_queue: Arc<Queue>
+        render_base: &RenderBase,
     ) -> Subbuffer<point_frag::UPointLightData> {
         return if let Some(buffer) = self.subbuffer.as_ref() {
             buffer.clone()
@@ -93,7 +91,7 @@ impl PointLight {
             let buf = Buffer::from_data(
                 buffer_allocator,
                 BufferCreateInfo {
-                    usage: BufferUsage::TRANSFER_SRC,
+                    usage: BufferUsage::TRANSFER_SRC | BufferUsage::UNIFORM_BUFFER,
                     ..Default::default()
                 },
                 AllocationCreateInfo {
@@ -108,10 +106,9 @@ impl PointLight {
             )
                 .unwrap()
                 .into_device_local(
+                    1,
                     buffer_allocator,
-                    BufferUsage::UNIFORM_BUFFER,
-                    command_buffer_allocator,
-                    transfer_queue.clone()
+                    render_base,
                 );
             self.subbuffer = Some(buf.clone());
             buf
