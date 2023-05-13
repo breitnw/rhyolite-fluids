@@ -23,6 +23,8 @@ and for ray-marched rendering:
 rhyolite = { version = foo, features = ["marched"] }
 ```
 
+As of now, ray-marched rendering is unstable and does not feature support for custom functions, so it's not recommended to use. These feature flags, therefore, will avoid bloating binaries with unnecessary code. 
+
 ---
 
 The code of this library is based partly on [Taidaesal's Vulkano tutorial](https://github.com/taidaesal/vulkano_tutorial), which, in turn, is based 
