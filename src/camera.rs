@@ -3,6 +3,7 @@ use vulkano::buffer::allocator::SubbufferAllocator;
 use vulkano::buffer::Subbuffer;
 
 use crate::{shaders::albedo_vert, transform::Transform, UnconfiguredError};
+use crate::renderer::staging::UniformSrc;
 
 pub struct Camera {
     transform: Transform,
@@ -35,7 +36,7 @@ impl Camera {
         far_clipping_plane: f32,
     ) -> Self {
         Camera {
-            view: transform.get_rendering_matrices().0.try_inverse().unwrap(),
+            view: transform.get_matrices().0.try_inverse().unwrap(),
             transform,
             fovy,
             near_clipping_plane,
@@ -64,15 +65,15 @@ impl Camera {
     }
 
     fn get_post_config(&self) -> Result<&CameraPostConfig, UnconfiguredError> {
-        self.post_config.as_ref().ok_or(
-            UnconfiguredError("Camera not yet configured. Do so with `Camera::configure()` before accessing projection matrix")
-        )
+        self.post_config.as_ref().ok_or(UnconfiguredError(
+            "Camera not yet configured. Do so with `Camera::configure()` before accessing projection matrix"
+        ))
     }
 
     fn get_post_config_mut(&mut self) -> Result<&mut CameraPostConfig, UnconfiguredError> {
         self.post_config.as_mut().ok_or(UnconfiguredError(
-            "Camera not yet configured. Do so with `Camera::configure()` before accessing projection matrix")
-        )
+            "Camera not yet configured. Do so with `Camera::configure()` before accessing projection matrix"
+        ))
     }
 
     pub(crate) fn is_configured(&self) -> bool {
@@ -103,20 +104,28 @@ impl Camera {
             self.needs_update = false;
             self.view = self
                 .transform
-                .get_rendering_matrices()
+                .get_matrices()
                 .0
                 .try_inverse()
                 .unwrap();
         }
 
-        let buf = subbuffer_allocator
-            .allocate_sized()
-            .unwrap();
-        *buf.write().unwrap() = albedo_vert::UCamData {
-            view: self.view.into(),
-            projection: self.get_post_config()?.projection.into(),
-        };
+        let buf = subbuffer_allocator.allocate_sized().unwrap();
+        *buf.write().unwrap() = self.get_raw();
 
         Ok(buf)
+    }
+}
+
+impl UniformSrc for Camera {
+    type UniformType = albedo_vert::UCamData;
+
+    fn get_raw(&self) -> Self::UniformType {
+        albedo_vert::UCamData {
+            view: self.view.into(),
+            projection: self.get_post_config().expect( // TODO: EWWW EXPECT (should be unconfigurederror somehow)
+                "Camera must be configured before getting buffer"
+            ).projection.into(),
+        }
     }
 }

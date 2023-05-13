@@ -6,11 +6,17 @@ use core::time;
 use std::time::Instant;
 
 use crate::input::Keyboard;
-use renderer::{/*marched::MarchedRenderer,*/ mesh::MeshRenderer, Renderer};
+use renderer::Renderer;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop, EventLoopWindowTarget},
 };
+
+#[cfg(feature = "mesh")]
+use crate::renderer::mesh::MeshRenderer;
+
+#[cfg(feature = "marched")]
+use crate::renderer::marched::MarchedRenderer;
 
 pub mod camera;
 pub mod geometry;
@@ -29,8 +35,9 @@ pub struct Rhyolite<T: Renderer> {
     event_loop: Option<EventLoop<()>>,
 }
 
+#[cfg(feature = "mesh")]
 impl Rhyolite<MeshRenderer> {
-    /// Creates a new Rhyolite mesh renderer with a specified Winit event loop.
+    /// Creates a new Rhyolite Mesh renderer with a specified Winit event loop.
     pub fn mesh() -> Rhyolite<MeshRenderer> {
         let event_loop = EventLoop::new();
         let renderer = MeshRenderer::new(&event_loop);
@@ -41,17 +48,18 @@ impl Rhyolite<MeshRenderer> {
     }
 }
 
-// impl Rhyolite<MarchedRenderer> {
-//     /// Creates a new Rhyolite ray marched renderer with a specified Winit event loop.
-//     pub fn ray_marched() -> Rhyolite<MarchedRenderer> {
-//         let event_loop = EventLoop::new();
-//         let renderer = MarchedRenderer::new(&event_loop);
-//         Rhyolite {
-//             renderer,
-//             event_loop: Some(event_loop),
-//         }
-//     }
-// }
+#[cfg(feature = "marched")]
+impl Rhyolite<MarchedRenderer> {
+    /// Creates a new Rhyolite ray marched renderer with a specified Winit event loop.
+    pub fn ray_marched() -> Rhyolite<MarchedRenderer> {
+        let event_loop = EventLoop::new();
+        let renderer = MarchedRenderer::new(&event_loop);
+        Rhyolite {
+            renderer,
+            event_loop: Some(event_loop),
+        }
+    }
+}
 
 impl<T: Renderer + 'static> Rhyolite<T> {
     /// Runs a FnMut closure with the Rhyolite instance. Events for program exiting, swapchain recreation on resize, and TimeState calculation are executed before
@@ -78,12 +86,9 @@ impl<T: Renderer + 'static> Rhyolite<T> {
             .unwrap()
             .run(move |event, target, control_flow| {
                 match &event {
-                    Event::WindowEvent { event, ..} => match event {
+                    Event::WindowEvent { event, .. } => match event {
                         WindowEvent::CloseRequested => {
                             *control_flow = ControlFlow::Exit;
-                        }
-                        WindowEvent::ScaleFactorChanged { .. } => {
-                            self.renderer.recreate_all_size_dependent();
                         }
                         WindowEvent::Resized(_) => {
                             self.renderer.recreate_all_size_dependent();
@@ -94,8 +99,8 @@ impl<T: Renderer + 'static> Rhyolite<T> {
                         WindowEvent::Occluded(val) => {
                             occluded = *val;
                         }
-                        _ => ()
-                    }
+                        _ => (),
+                    },
                     Event::RedrawEventsCleared => time_state.update(),
                     _ => (),
                 }

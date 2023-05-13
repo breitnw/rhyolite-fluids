@@ -1,14 +1,14 @@
 use crate::camera::Camera;
 use crate::geometry::dummy::DummyVertex;
-use crate::geometry::loader::BasicVertex;
-use crate::geometry::MeshObject;
+use crate::geometry::mesh::loader::BasicVertex;
+use crate::geometry::mesh::MeshObject;
 use crate::lighting::{AmbientLight, PointLight};
-use crate::shaders::{albedo_frag, albedo_vert, Shaders};
+use crate::renderer::staging::{IntoPersistentUniform};
+use crate::shaders::{albedo_frag, Shaders};
 use crate::UnconfiguredError;
-use crate::renderer::staging::StagingBuffer;
 
 use vulkano;
-use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage, Subbuffer};
+use vulkano::buffer::{BufferUsage, Subbuffer};
 use vulkano::command_buffer::SubpassContents;
 use vulkano::descriptor_set::allocator::StandardDescriptorSetAllocator;
 use vulkano::descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet};
@@ -17,8 +17,7 @@ use vulkano::format::Format;
 use vulkano::image::view::ImageView;
 use vulkano::image::{AttachmentImage, ImageAccess, SwapchainImage};
 use vulkano::memory::allocator::{
-    AllocationCreateInfo, FreeListAllocator, GenericMemoryAllocator, MemoryAllocator,
-    MemoryUsage,
+    FreeListAllocator, GenericMemoryAllocator, MemoryAllocator, MemoryUsage,
 };
 use vulkano::pipeline::graphics::color_blend::{
     AttachmentBlend, BlendFactor, BlendOp, ColorBlendState,
@@ -37,6 +36,13 @@ use vulkano::buffer::allocator::{SubbufferAllocator, SubbufferAllocatorCreateInf
 
 use super::{RenderBase, Renderer};
 
+/// An enum representing the sequential stages of rendering necessary for construction of the
+/// command buffer. Since Rhyolite's Mesh engine uses deferred rendering, they must be added
+/// in the following order:
+/// 1. Albedo
+/// 2. Ambient
+/// 3. Point (optional)
+/// 4. Unlit (optional)
 #[derive(Debug, Clone, PartialEq)]
 enum RenderStage {
     Stopped,
@@ -47,6 +53,22 @@ enum RenderStage {
 }
 
 impl RenderStage {
+    /// Advances this `RenderStage`'s value to match that of new_stage.
+    /// # Panics
+    /// Since advancement between `RenderStage`s is meant to be manually implemented rather than
+    /// determined programmatically, the purpose of this function is to panic if the stages are
+    /// called out of order. The function will panic in these circumstances:
+    /// 1. Trying to enter `RenderStage::Albedo` when the current stage is something other than
+    /// `RenderStage::Stopped` or `RenderStage::Albedo`
+    /// 2. Trying to enter `RenderStage::Ambient` when the current stage is something other than
+    /// `RenderStage::Albedo`
+    /// 3. Trying to enter `RenderStage::Point` when the current stage is something other than
+    /// `RenderStage::Ambient` or `RenderStage::Point`
+    /// 4. Trying to enter `RenderStage::Unlit` when the current stage is something other than
+    /// `RenderStage::Ambient`, `RenderStage::Point`, or `RenderStage::Unlit`
+    /// 5. Trying to enter `RenderStage::Stopped` (usually by calling the renderer's `finish()`
+    /// function) when the current stage is something other than `RenderStage::Ambient`,
+    /// `RenderStage::Point`, or `RenderStage::Unlit`
     fn update(&mut self, new_stage: RenderStage) {
         let mut out_of_order = false;
         match new_stage {
@@ -78,7 +100,7 @@ impl RenderStage {
                 _ => out_of_order = true,
             },
             RenderStage::Stopped => match self {
-                RenderStage::Point | RenderStage::Unlit => {
+                RenderStage::Ambient | RenderStage::Point | RenderStage::Unlit => {
                     *self = RenderStage::Stopped;
                 }
                 _ => out_of_order = true,
@@ -100,15 +122,13 @@ pub struct MeshRenderer {
 
     buffer_allocator: Arc<GenericMemoryAllocator<Arc<FreeListAllocator>>>,
     descriptor_set_allocator: StandardDescriptorSetAllocator,
-
     subbuffer_allocator: SubbufferAllocator,
 
     vp_set: Option<Arc<PersistentDescriptorSet>>,
 
-    pipelines: Pipelines,
-
     dummy_vertex_buf: Subbuffer<[DummyVertex]>,
 
+    pipelines: Pipelines,
     framebuffers: Vec<Arc<Framebuffer>>,
     attachment_buffers: AttachmentBuffers,
 
@@ -145,24 +165,7 @@ impl MeshRenderer {
         );
 
         // Create a dummy vertex buffer used for full-screen shaders
-        let dummy_vertex_buf = Buffer::from_iter(
-            &buffer_allocator,
-            BufferCreateInfo {
-                usage: BufferUsage::TRANSFER_SRC | BufferUsage::VERTEX_BUFFER,
-                ..Default::default()
-            },
-            AllocationCreateInfo {
-                usage: MemoryUsage::Upload,
-                ..Default::default()
-            },
-            DummyVertex::list(),
-        )
-            .unwrap()
-            .into_device_local(
-                6,
-                &buffer_allocator,
-                &base,
-            );
+        let dummy_vertex_buf = DummyVertex::buf(&buffer_allocator, &base);
 
         // Includes framebuffers and other attachments that aren't stored
         let (framebuffers, attachment_buffers, pipelines) = window_size_dependent_setup(
@@ -176,17 +179,17 @@ impl MeshRenderer {
         Self {
             base,
 
+            render_pass,
+
             buffer_allocator,
             descriptor_set_allocator,
             subbuffer_allocator,
 
             vp_set: None,
 
-            pipelines,
-
             dummy_vertex_buf,
 
-            render_pass,
+            pipelines,
             framebuffers,
             attachment_buffers,
 
@@ -246,24 +249,14 @@ impl MeshRenderer {
         }
         self.render_stage.update(RenderStage::Albedo);
 
-        let (model_mat, normal_mat) = object.transform.get_rendering_matrices();
-
-        let albedo_subbuffer = self.subbuffer_allocator
-            .allocate_sized()
-            .unwrap();
-        *albedo_subbuffer.write().unwrap() = albedo_vert::UModelData {
-            model: model_mat.into(),
-            normals: normal_mat.into(),
-        };
-
+        let albedo_subbuffer = self.subbuffer_allocator.allocate_sized().unwrap();
+        *albedo_subbuffer.write().unwrap() = object.get_raw_updated();
 
         // TODO: Do this with textures instead!!!!!!!!! Not a subbuffer!!!!!!!!!
         // or at least store the buffer instead of recreating it every frame.....
         let (intensity, shininess) = object.get_specular();
 
-        let specular_subbuffer = self.subbuffer_allocator
-            .allocate_sized()
-            .unwrap();
+        let specular_subbuffer = self.subbuffer_allocator.allocate_sized().unwrap();
         *specular_subbuffer.write().unwrap() = albedo_frag::USpecularData {
             intensity,
             shininess,
@@ -327,10 +320,7 @@ impl MeshRenderer {
             ambient_layout.clone(),
             [
                 WriteDescriptorSet::image_view(0, self.attachment_buffers.albedo_buffer.clone()),
-                WriteDescriptorSet::buffer(1, light.get_buffer(
-                    &self.buffer_allocator,
-                    &self.base
-                )),
+                WriteDescriptorSet::buffer(1, light.get_buffer(&self.buffer_allocator, &self.base)),
             ],
         )
         .unwrap();
@@ -378,10 +368,7 @@ impl MeshRenderer {
                 WriteDescriptorSet::image_view(1, self.attachment_buffers.normal_buffer.clone()),
                 WriteDescriptorSet::image_view(2, self.attachment_buffers.frag_pos_buffer.clone()),
                 WriteDescriptorSet::image_view(3, self.attachment_buffers.specular_buffer.clone()),
-                WriteDescriptorSet::buffer(4, light.get_buffer(
-                    &self.buffer_allocator,
-                    &self.base
-                )),
+                WriteDescriptorSet::buffer(4, light.get_buffer(&self.buffer_allocator, &self.base)),
             ],
         )
         .unwrap();
@@ -409,16 +396,8 @@ impl MeshRenderer {
         }
         self.render_stage.update(RenderStage::Unlit);
 
-        let (model_mat, normal_mat) = object.transform.get_rendering_matrices();
-        let uniform_data = albedo_vert::UModelData {
-            model: model_mat.into(),
-            normals: normal_mat.into(),
-        };
-
-        let unlit_subbuffer = self.subbuffer_allocator
-            .allocate_sized()
-            .unwrap();
-        *unlit_subbuffer.write().unwrap() = uniform_data;
+        let unlit_subbuffer = self.subbuffer_allocator.allocate_sized().unwrap();
+        *unlit_subbuffer.write().unwrap() = object.get_raw_updated();
 
         let unlit_layout = self
             .pipelines
@@ -471,14 +450,13 @@ impl Renderer for MeshRenderer {
     fn recreate_all_size_dependent(&mut self) {
         self.base.recreate_swapchain();
         // TODO: use a different allocator?
-        let (framebuffers, attachment_buffers, pipelines) =
-            window_size_dependent_setup(
-                &self.buffer_allocator,
-                &self.base.images,
-                self.render_pass.clone(),
-                &mut self.base.viewport,
-                &self.base.device
-            );
+        let (framebuffers, attachment_buffers, pipelines) = window_size_dependent_setup(
+            &self.buffer_allocator,
+            &self.base.images,
+            self.render_pass.clone(),
+            &mut self.base.viewport,
+            &self.base.device,
+        );
         self.framebuffers = framebuffers;
         self.attachment_buffers = attachment_buffers;
         self.pipelines = pipelines;
@@ -578,7 +556,7 @@ fn window_size_dependent_setup(
     (framebuffers, attachment_buffers, pipelines)
 }
 
-pub struct Pipelines {
+struct Pipelines {
     albedo: Arc<GraphicsPipeline>,
     point: Arc<GraphicsPipeline>,
     ambient: Arc<GraphicsPipeline>,
@@ -698,6 +676,8 @@ impl Pipelines {
     }
 }
 
+/// Gets the render pass to use with the Mesh renderer. In Vulkan, a render pass is the set of
+/// attachments, the way they are used, and the rendering work that is performed using them.
 fn get_render_pass(device: &Arc<Device>, final_format: Format) -> Arc<RenderPass> {
     vulkano::ordered_passes_renderpass!(
         device.clone(),

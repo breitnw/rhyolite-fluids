@@ -9,14 +9,19 @@ use vulkano::command_buffer::{
     SubpassContents,
 };
 use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType};
-use vulkano::device::{Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags};
+use vulkano::device::{
+    Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags,
+};
 use vulkano::format::ClearValue;
 use vulkano::image::SwapchainImage;
 use vulkano::instance::{Instance, InstanceCreateInfo};
 use vulkano::library::VulkanLibrary;
 use vulkano::pipeline::graphics::viewport::Viewport;
 use vulkano::render_pass::Framebuffer;
-use vulkano::swapchain::{AcquireError, Surface, Swapchain, SwapchainAcquireFuture, SwapchainCreateInfo, SwapchainCreationError, SwapchainPresentInfo};
+use vulkano::swapchain::{
+    AcquireError, Surface, Swapchain, SwapchainAcquireFuture, SwapchainCreateInfo,
+    SwapchainCreationError, SwapchainPresentInfo,
+};
 use vulkano::sync::{FlushError, GpuFuture};
 use vulkano::Version;
 use vulkano_win;
@@ -26,7 +31,9 @@ use winit::window::{Window, WindowBuilder};
 use std::sync::Arc;
 use winit::dpi::LogicalSize;
 
-// pub mod marched;
+#[cfg(feature = "marched")]
+pub mod marched;
+#[cfg(feature = "mesh")]
 pub mod mesh;
 pub(crate) mod staging;
 
@@ -38,13 +45,21 @@ pub trait Renderer {
     }
 }
 
+/// A struct representing the essential elements of any rendering engine created with Rhyolite.
+///
+/// The `RenderBase` takes care of the following responsibilities:
+/// - Basic setup of Vulkan structs, including the Vulkan instance, physical and logical devices,
+/// surface, queues, swapchain, viewport, and command buffers
+/// - GPU synchronization
+/// - Swapchain recreation (if necessary)
+/// - Management and execution of command buffers
 pub struct RenderBase {
     instance: Arc<Instance>,
     surface: Arc<Surface>,
     window: Arc<Window>,
     device: Arc<Device>,
     swapchain: Arc<Swapchain>,
-    images: Vec<Arc<SwapchainImage>>,
+    pub(crate) images: Vec<Arc<SwapchainImage>>,
 
     graphics_queue: Arc<Queue>,
     transfer_queue: Arc<Queue>,
@@ -90,18 +105,25 @@ impl RenderBase {
         let queues: Vec<Arc<Queue>> = queues.collect();
 
         let find_queue = |queue_flags: QueueFlags| -> Arc<Queue> {
-            queues.iter().find(|q| {
-                physical_device
-                    .queue_family_properties()[q.queue_family_index() as usize]
-                    .queue_flags
-                    .contains(queue_flags)
-            }).unwrap().clone()
+            queues
+                .iter()
+                .find(|q| {
+                    physical_device.queue_family_properties()[q.queue_family_index() as usize]
+                        .queue_flags
+                        .contains(queue_flags)
+                })
+                .unwrap()
+                .clone()
         };
 
         let graphics_queue = find_queue(QueueFlags::GRAPHICS);
         let transfer_queue = find_queue(QueueFlags::TRANSFER);
 
-        println!("Queue families:\n\tQueueFlags::GRAPHICS: {}\n\tQueueFlags::TRANSFER: {}", graphics_queue.queue_family_index(), transfer_queue.queue_family_index());
+        println!(
+            "Queue families:\n\tQueueFlags::GRAPHICS: {}\n\tQueueFlags::TRANSFER: {}",
+            graphics_queue.queue_family_index(),
+            transfer_queue.queue_family_index()
+        );
 
         // Create the swapchain, an object which contains a vector of Images used for rendering and information on
         // how to show them to the user
@@ -192,7 +214,7 @@ impl RenderBase {
             self.graphics_queue.queue_family_index(),
             CommandBufferUsage::OneTimeSubmit,
         )
-        .unwrap();
+            .unwrap();
 
         command_buffer_builder
             .begin_render_pass(
@@ -261,7 +283,6 @@ impl RenderBase {
 
     /// Recreates the swapchain. Should be called if the swapchain is invalidated, such as by a window resize
     fn recreate_swapchain(&mut self) {
-
         let (new_swapchain, new_images) = match self.swapchain.recreate(SwapchainCreateInfo {
             image_extent: self.window.inner_size().into(),
             ..self.swapchain.create_info()
@@ -301,13 +322,14 @@ pub(crate) fn select_physical_device(
         .enumerate_physical_devices()
         .unwrap()
         .filter(|p| p.supported_extensions().contains(device_extensions))
-        .filter_map(|p|
+        .filter_map(|p| {
             find_queue_families(
                 &[QueueFlags::GRAPHICS, QueueFlags::TRANSFER],
                 p.clone(),
                 surface,
-            ).map(|q| (p, q))
-        )
+            )
+                .map(|q| (p, q))
+        })
         .min_by_key(|(p, _)| match p.properties().device_type {
             PhysicalDeviceType::DiscreteGpu => 0,
             PhysicalDeviceType::IntegratedGpu => 1,
@@ -329,30 +351,38 @@ pub(crate) fn select_physical_device(
 
 // QUEUE FAMILIES
 
-fn find_queue_family(required_flags: QueueFlags, physical_device: Arc<PhysicalDevice>, surface: &Surface) -> Option<usize> {
-    physical_device.queue_family_properties()
+fn find_queue_family(
+    required_flags: QueueFlags,
+    physical_device: Arc<PhysicalDevice>,
+    surface: &Surface,
+) -> Option<usize> {
+    physical_device
+        .queue_family_properties()
         .iter()
         .enumerate()
         .find(|&q| {
-            if required_flags.contains(QueueFlags::GRAPHICS) &&
-                !physical_device.surface_support(q.0 as u32, surface).unwrap_or(false) {
-            }
+            if required_flags.contains(QueueFlags::GRAPHICS)
+                && !physical_device
+                .surface_support(q.0 as u32, surface)
+                .unwrap_or(false)
+            {}
             q.1.queue_flags.contains(required_flags)
-
         })
-        .map(|q| {q.0})
+        .map(|q| q.0)
 }
 
 fn find_queue_families(
     required_flags: &[QueueFlags],
     physical_device: Arc<PhysicalDevice>,
-    surface: &Surface
+    surface: &Surface,
 ) -> Option<Vec<u32>> {
     let mut queue_families = Vec::new();
     for flags in required_flags.into_iter() {
         if let Some(family) = find_queue_family(flags.clone(), physical_device.clone(), surface) {
             queue_families.push(family as u32);
-        } else { return None }
+        } else {
+            return None;
+        }
     }
     queue_families.sort();
     queue_families.dedup();
@@ -378,7 +408,7 @@ pub(crate) fn get_instance() -> Arc<Instance> {
             ..Default::default()
         },
     )
-    .unwrap()
+        .unwrap()
 }
 
 /// Creates the physical device, logical device, and queues that will be needed for rendering
@@ -399,10 +429,13 @@ pub(crate) fn get_device(
     let (physical_device, queue_families) =
         select_physical_device(instance, surface, &enabled_extensions);
 
-    let queue_create_infos = queue_families.iter().map(|q| QueueCreateInfo {
-        queue_family_index: *q,
-        ..Default::default()
-    }).collect();
+    let queue_create_infos = queue_families
+        .iter()
+        .map(|q| QueueCreateInfo {
+            queue_family_index: *q,
+            ..Default::default()
+        })
+        .collect();
 
     // Create a device, which is the software representation of the hardware stored in the physical device
     let (device, queues) = Device::new(
@@ -413,7 +446,7 @@ pub(crate) fn get_device(
             ..Default::default()
         },
     )
-    .expect("Unable to create logical device!");
+        .expect("Unable to create logical device!");
 
     (physical_device, device, queues)
 }
@@ -446,5 +479,5 @@ pub(crate) fn get_swapchain(
             ..Default::default()
         },
     )
-    .unwrap()
+        .unwrap()
 }

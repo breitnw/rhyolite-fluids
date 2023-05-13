@@ -1,11 +1,10 @@
-
+use crate::renderer::RenderBase;
 use vulkano::buffer::{Buffer, BufferContents, BufferCreateInfo, BufferUsage, Subbuffer};
 use vulkano::command_buffer::{
     AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferInfo, PrimaryCommandBufferAbstract,
 };
 use vulkano::memory::allocator::{AllocationCreateInfo, MemoryAllocator, MemoryUsage};
 use vulkano::sync::GpuFuture;
-use crate::renderer::RenderBase;
 
 pub(crate) trait StagingBuffer {
     fn into_device_local(
@@ -15,6 +14,8 @@ pub(crate) trait StagingBuffer {
         render_base: &RenderBase,
     ) -> Self;
 }
+
+// TODO: remove the buffer_len parameter by improving generics and utilizing len() function of Subbuffer<[T]>
 
 impl<T: BufferContents + ?Sized> StagingBuffer for Subbuffer<T> {
     /// Creates a device local buffer, using this buffer for staging and subsequently executing a
@@ -85,5 +86,50 @@ impl<T: BufferContents + ?Sized> StagingBuffer for Subbuffer<T> {
         // println!("Created device-local buffer: {:?}", buffer_usage);
 
         return device_local_buf;
+    }
+}
+
+pub(crate) trait UniformSrc {
+    type UniformType: BufferContents;
+    fn get_raw(&self) -> Self::UniformType;
+}
+
+pub(crate) trait IntoPersistentUniform: UniformSrc {
+    fn get_current_buffer(&self) -> Option<Subbuffer<Self::UniformType>>;
+    fn set_current_buffer(&mut self, buf: Subbuffer<Self::UniformType>);
+
+    fn create_buffer(
+        &mut self,
+        buffer_allocator: &(impl MemoryAllocator + ?Sized),
+        render_base: &RenderBase
+    ) -> Subbuffer<Self::UniformType> {
+        let buf: Subbuffer<Self::UniformType> = Buffer::from_data(
+            buffer_allocator,
+            BufferCreateInfo {
+                usage: BufferUsage::TRANSFER_SRC | BufferUsage::UNIFORM_BUFFER,
+                ..Default::default()
+            },
+            AllocationCreateInfo {
+                usage: MemoryUsage::Upload,
+                ..Default::default()
+            },
+            self.get_raw()
+        )
+            .unwrap()
+            .into_device_local(1, buffer_allocator, render_base);
+        self.set_current_buffer(buf.clone());
+        buf
+    }
+
+    fn get_buffer(
+        &mut self,
+        buffer_allocator: &(impl MemoryAllocator + ?Sized),
+        render_base: &RenderBase
+    ) -> Subbuffer<Self::UniformType>{
+        return if let Some(buffer) = self.get_current_buffer().as_ref() {
+            buffer.clone()
+        } else {
+            self.create_buffer(buffer_allocator, render_base)
+        }
     }
 }

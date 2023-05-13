@@ -17,7 +17,7 @@ struct UPointLight {
     float intensity;
 };
 
-layout(set = 1, binding = 0) uniform UPointLightData {
+layout(set = 1, binding = 0) uniform UPointLightsData {
     UPointLight data[MAX_POINT_LIGHTS];
     int len;
 } point_lights;
@@ -77,7 +77,7 @@ vec3 phong(in vec3 frag_pos, in UPointLight light, in vec3 cam_pos) {
     const float specular_shininess = 64.0;
 
     vec3 light_dir = vec3(light.position) - frag_pos;
-    float dist_squared = pow(length(light_dir), 2);
+    float dist_squared = pow(length(light_dir), 2.0);
     light_dir = normalize(light_dir);
 
     vec3 normal = get_normal(frag_pos);
@@ -132,9 +132,9 @@ void main() {
     vec3 cam_pos = vec3(view_i[3][0], view_i[3][1], view_i[3][2]);
 
     vec3 ro = cam_pos;
-    vec3 rd = mat3(vp_uniforms.view) * normalize(vec3(uv, 1.0)); // TODO: rotation is kinda weird here
+    vec3 rd = mat3(vp_uniforms.view) * normalize(vec3(uv, 1.0));
     rd.z *= -1;
-    
+
     vec3 shaded_color = ray_march(ro, rd);
     
     out_color = vec4(shaded_color, 1.0);
