@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use nalgebra_glm::{perspective, TMat4};
 use vulkano::buffer::allocator::SubbufferAllocator;
 use vulkano::buffer::Subbuffer;
@@ -6,16 +7,14 @@ use crate::{shaders::albedo_vert, transform::Transform, UnconfiguredError};
 use crate::renderer::staging::UniformSrc;
 
 pub struct Camera {
-    transform: Transform,
-
-    view: TMat4<f32>,
     fovy: f32,
     near_clipping_plane: f32,
     far_clipping_plane: f32,
-
-    needs_update: bool,
-
+    transform: Transform,
+    /// A struct containing post-configuration data that must be added after the engine is created
     post_config: Option<CameraPostConfig>,
+    /// A cache of the view matrix so that it doesn't need to be recalculated every frame
+    cache: Cell<Option<TMat4<f32>>>,
 }
 
 struct CameraPostConfig {
@@ -30,19 +29,18 @@ impl Camera {
     /// * `near_clipping_plane`: The nearest distance at which geometry will clip out of view.
     /// * `far_clipping_plane`: The farthest distance at which geometry will clip out of view.
     pub fn new(
-        mut transform: Transform,
+        transform: Transform,
         fovy: f32,
         near_clipping_plane: f32,
         far_clipping_plane: f32,
     ) -> Self {
         Camera {
-            view: transform.get_matrices().0.try_inverse().unwrap(),
             transform,
             fovy,
             near_clipping_plane,
             far_clipping_plane,
-            needs_update: true,
             post_config: None,
+            cache: Cell::new(None),
         }
     }
 
@@ -55,8 +53,6 @@ impl Camera {
             self.near_clipping_plane,
             self.far_clipping_plane,
         );
-
-        self.needs_update = true;
 
         self.post_config = Some(CameraPostConfig {
             aspect_ratio,
@@ -85,7 +81,7 @@ impl Camera {
     /// Calling this function forces the camera's subbuffers to be updated at the end of the frame,
     /// so only use it when it's necessary to move the camera.
     pub fn transform_mut(&mut self) -> &mut Transform {
-        self.needs_update = true;
+        self.cache.set(None);
         &mut self.transform
     }
 
@@ -94,22 +90,27 @@ impl Camera {
         &self.transform
     }
 
+    /// Calculates the camera's view matrix, and caches the result
+    fn get_view(&self) -> TMat4<f32> {
+        if let Some(cache) = self.cache.get() {
+            return cache;
+        }
+        let view = self
+            .transform
+            .get_matrices()
+            .0
+            .try_inverse()
+            .unwrap();
+        self.cache.set(Some(view));
+        view
+    }
+
     /// Returns a subbuffer containing the camera's view and projection data as required for
     /// rendering. Allocates from a `SubbufferAllocator`.
     pub(crate) fn get_vp_subbuffer(
         &mut self,
         subbuffer_allocator: &SubbufferAllocator,
     ) -> Result<Subbuffer<albedo_vert::UCamData>, UnconfiguredError> {
-        if self.needs_update {
-            self.needs_update = false;
-            self.view = self
-                .transform
-                .get_matrices()
-                .0
-                .try_inverse()
-                .unwrap();
-        }
-
         let buf = subbuffer_allocator.allocate_sized().unwrap();
         *buf.write().unwrap() = self.get_raw();
 
@@ -122,7 +123,7 @@ impl UniformSrc for Camera {
 
     fn get_raw(&self) -> Self::UniformType {
         albedo_vert::UCamData {
-            view: self.view.into(),
+            view: self.get_view().into(),
             projection: self.get_post_config().expect( // TODO: EWWW EXPECT (should be unconfigurederror somehow)
                 "Camera must be configured before getting buffer"
             ).projection.into(),

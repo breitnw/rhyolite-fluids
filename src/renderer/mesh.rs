@@ -3,7 +3,7 @@ use crate::geometry::dummy::DummyVertex;
 use crate::geometry::mesh::loader::BasicVertex;
 use crate::geometry::mesh::MeshObject;
 use crate::lighting::{AmbientLight, PointLight};
-use crate::renderer::staging::{IntoPersistentUniform};
+use crate::renderer::staging::{IntoPersistentUniform, UniformSrc};
 use crate::shaders::{albedo_frag, Shaders};
 use crate::UnconfiguredError;
 
@@ -250,7 +250,7 @@ impl MeshRenderer {
         self.render_stage.update(RenderStage::Albedo);
 
         let albedo_subbuffer = self.subbuffer_allocator.allocate_sized().unwrap();
-        *albedo_subbuffer.write().unwrap() = object.get_raw_updated();
+        *albedo_subbuffer.write().unwrap() = object.get_raw();
 
         // TODO: Do this with textures instead!!!!!!!!! Not a subbuffer!!!!!!!!!
         // or at least store the buffer instead of recreating it every frame.....
@@ -397,7 +397,7 @@ impl MeshRenderer {
         self.render_stage.update(RenderStage::Unlit);
 
         let unlit_subbuffer = self.subbuffer_allocator.allocate_sized().unwrap();
-        *unlit_subbuffer.write().unwrap() = object.get_raw_updated();
+        *unlit_subbuffer.write().unwrap() = object.get_raw();
 
         let unlit_layout = self
             .pipelines

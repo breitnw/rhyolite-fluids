@@ -99,24 +99,14 @@ impl MeshObject {
         object_transform.set_scale(scale);
         MeshObject::new(object_transform, vertices, specular.0, specular.1)
     }
-
-    /// Gets the raw uniform data of this MeshObject, in the format of `albedo_vert::UModelData`.
-    pub(crate) fn get_raw_updated(&mut self) -> <MeshObject as UniformSrc>::UniformType {
-        self.transform.update_matrices();
-        self.get_raw()
-    }
 }
 
 impl UniformSrc for MeshObject {
     type UniformType = albedo_vert::UModelData;
 
     /// Gets the raw uniform data of this MeshObject, in the format of `albedo_vert::UModelData`.
-    ///
-    /// This data **MAY NOT** be updated, since the transform's matrices must be updated after
-    /// position, rotation, or scale data is changed. For updated data, you should **ALWAYS** use
-    /// `get_raw_updated` instead.
     fn get_raw(&self) -> Self::UniformType {
-        let (model_mat, normal_mat) = self.transform.get_current_matrices();
+        let (model_mat, normal_mat) = self.transform.get_matrices();
 
         albedo_vert::UModelData {
             model: model_mat.into(),
