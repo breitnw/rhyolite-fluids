@@ -19,7 +19,7 @@ struct UPointLight {
 
 layout(set = 1, binding = 0) uniform UPointLightsData {
     UPointLight data[MAX_POINT_LIGHTS];
-    int len;
+    uint len;
 } point_lights;
 
 layout(set = 1, binding = 1) uniform UAmbientLightData {
@@ -35,7 +35,7 @@ struct UMetaball {
 
 layout(set = 2, binding = 0) uniform UMetaballData {
     UMetaball data[MAX_METABALLS];
-    int len;
+    uint len;
 } metaballs;
 
 layout(location = 0) out vec4 out_color;
@@ -106,11 +106,11 @@ vec3 get_lighting(in vec3 frag_pos, in vec3 cam_pos) {
 
 vec3 ray_march(in vec3 ro, in vec3 rd) {
     float distance_traveled = 0.0;
-    const int NUMBER_OF_STEPS = 100;
+    const uint NUMBER_OF_STEPS = 100;
     const float MINIMUM_HIT_DISTANCE = 0.01;
     const float MAXIMUM_TRACE_DISTANCE = 50.0;
     
-    for (int i = 0; i < NUMBER_OF_STEPS; i++) {
+    for (uint i = 0; i < NUMBER_OF_STEPS; i++) {
         vec3 current_position = ro + distance_traveled * rd;
         float distance_to_closest = map_the_world(current_position);
         

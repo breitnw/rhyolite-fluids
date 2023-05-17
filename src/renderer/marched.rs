@@ -9,7 +9,7 @@ use vulkano::device::Device;
 use vulkano::format::Format;
 use vulkano::image::view::ImageView;
 use vulkano::image::{ImageAccess, SwapchainImage};
-use vulkano::memory::allocator::{AllocationCreateInfo, FreeListAllocator, GenericMemoryAllocator, MemoryUsage};
+use vulkano::memory::allocator::{AllocationCreateInfo, FreeListAllocator, GenericMemoryAllocator, MemoryUsage, StandardMemoryAllocator};
 use vulkano::padded::Padded;
 use vulkano::pipeline::graphics::input_assembly::InputAssemblyState;
 use vulkano::pipeline::graphics::vertex_input::Vertex;
@@ -35,7 +35,7 @@ pub struct MarchedRenderer {
 
     render_pass: Arc<RenderPass>,
 
-    buffer_allocator: Arc<GenericMemoryAllocator<Arc<FreeListAllocator>>>,
+    buffer_allocator: Arc<StandardMemoryAllocator>,
     descriptor_set_allocator: StandardDescriptorSetAllocator,
     subbuffer_allocator: SubbufferAllocator,
 
@@ -211,11 +211,11 @@ impl MarchedRenderer {
             },
             marched_frag::UPointLightsData {
                 data: point_light_data,
-                len: point_light_count as i32,
+                len: point_light_count as u32,
             }
         )
             .unwrap()
-            .into_device_local(1, &self.buffer_allocator, self.base());
+            .into_device_local(1, &self.buffer_allocator, self.get_base());
 
 
         let layout = self.pipeline.layout().set_layouts().get(1).unwrap().clone();
@@ -229,7 +229,7 @@ impl MarchedRenderer {
                 ),
                 WriteDescriptorSet::buffer(
                     1,
-                    ambient_light.get_buffer(&self.buffer_allocator, self.base()),
+                    ambient_light.get_buffer(&self.buffer_allocator, self.get_base()),
                 ),
             ],
         ).unwrap();
@@ -250,7 +250,7 @@ impl MarchedRenderer {
             })
             .collect();
 
-        let len = objects.len() as i32;
+        let len = objects.len() as u32;
         let data = unsafe {
             to_partially_init_arr::<MAX_METABALLS, Padded<marched_frag::UMetaball, 12>>(objects)
         };
@@ -282,7 +282,7 @@ impl Renderer for MarchedRenderer {
         self.framebuffers = framebuffers;
         self.pipeline = pipeline;
     }
-    fn base(&self) -> &RenderBase {
+    fn get_base(&self) -> &RenderBase {
         &self.base
     }
 }

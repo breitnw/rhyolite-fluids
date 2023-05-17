@@ -18,6 +18,9 @@ use crate::renderer::mesh::MeshRenderer;
 #[cfg(feature = "marched")]
 use crate::renderer::marched::MarchedRenderer;
 
+// #[cfg(feature = "vulkano")]
+// pub use { vulkano, vulkano_shaders };
+
 pub mod camera;
 pub mod geometry;
 pub mod input;

@@ -39,9 +39,9 @@ pub(crate) mod staging;
 
 pub trait Renderer {
     fn recreate_all_size_dependent(&mut self);
-    fn base(&self) -> &RenderBase;
+    fn get_base(&self) -> &RenderBase;
     fn get_window_size(&self) -> [i32; 2] {
-        self.base().window.inner_size().into()
+        self.get_base().window.inner_size().into()
     }
 }
 
@@ -296,7 +296,7 @@ impl RenderBase {
         self.images = new_images;
     }
 
-    fn commands_mut(
+    pub fn commands_mut(
         &mut self,
     ) -> &mut AutoCommandBufferBuilder<
         PrimaryAutoCommandBuffer<StandardCommandBufferAlloc>,
@@ -305,6 +305,8 @@ impl RenderBase {
         // Should never panic because commands is initialized in start()
         self.commands.as_mut().unwrap()
     }
+
+    pub fn get_device(&self) -> Arc<Device> { self.device.clone() }
 }
 
 // ========================================
@@ -423,6 +425,7 @@ pub(crate) fn get_device(
     // Specify features for the physical device with the relevant extensions
     let enabled_extensions = DeviceExtensions {
         khr_swapchain: true,
+        khr_storage_buffer_storage_class: true,
         ..DeviceExtensions::empty()
     };
 
