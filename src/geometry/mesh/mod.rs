@@ -46,7 +46,7 @@ impl MeshObjectBuilder {
         specular: (f32, f32),
     ) -> MeshObjectBuilder {
         let vertices = ModelBuilder::from_file(path, true).build_basic([color.x, color.y, color.z]);
-        let mut object_transform = Transform::zero();
+        let mut object_transform = Transform::identity();
         object_transform.set_translation(translate);
         object_transform.set_scale(scale);
         MeshObjectBuilder::from_vertices(object_transform, vertices, specular.0, specular.1)

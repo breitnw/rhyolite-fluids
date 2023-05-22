@@ -11,7 +11,7 @@ pub struct Transform {
 
 impl Transform {
     /// Gets a transform with default translation, rotation, and scale parameters.
-    pub fn zero() -> Self {
+    pub fn identity() -> Self {
         Self {
             cache: Cell::new(None),
             translation: identity(),

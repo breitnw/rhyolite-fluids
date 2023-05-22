@@ -228,7 +228,7 @@ impl MeshRenderer {
     /// Finishes the rendering process and draws to the screen
     /// # Panics
     /// Panics if not called after a `draw_object_unlit()` call or a `draw_point()` call
-    pub fn finish(&mut self) {
+    pub fn end_render_pass(&mut self) {
         if self.base.render_error {
             return;
         }
