@@ -5,7 +5,6 @@ use crate::geometry::mesh::{MeshObject, MeshObjectBuilder};
 use crate::lighting::{AmbientLight, PointLight};
 use crate::renderer::staging::{IntoPersistentUniform, UniformSrc};
 use crate::shaders::{albedo_frag, Shaders};
-use crate::UnconfiguredError;
 
 use vulkano;
 use vulkano::buffer::{BufferUsage, Subbuffer};
@@ -16,7 +15,7 @@ use vulkano::device::Device;
 use vulkano::format::Format;
 use vulkano::image::view::ImageView;
 use vulkano::image::{AttachmentImage, ImageAccess, SwapchainImage};
-use vulkano::memory::allocator::{GenericMemoryAllocatorCreateInfo, MemoryAllocator, MemoryUsage, StandardMemoryAllocator};
+use vulkano::memory::allocator::{MemoryAllocator, MemoryUsage, StandardMemoryAllocator};
 use vulkano::pipeline::graphics::color_blend::{
     AttachmentBlend, BlendFactor, BlendOp, ColorBlendState,
 };
@@ -31,6 +30,7 @@ use winit::event_loop::EventLoop;
 
 use std::sync::Arc;
 use vulkano::buffer::allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo};
+use crate::transform::Transform;
 
 use super::{RenderBase, Renderer};
 
@@ -194,7 +194,7 @@ impl MeshRenderer {
     }
 
     /// Starts the rendering process for the current frame
-    pub fn start(&mut self, camera: &mut Camera) {
+    pub fn start_render_pass(&mut self, camera: &mut Camera) {
         if !camera.is_configured() {
             camera.configure(self.get_window_size());
         }
@@ -315,6 +315,60 @@ impl MeshRenderer {
         self.base.commands_mut()
             .draw_indirect(indirect_buffer)
             .unwrap();
+    }
+
+    // TODO: Make MeshObject generic and use that instead
+    /// Draws an object based on a custom vertex buffer and graphics pipeline. Lighting data will
+    /// still be added later. **THIS FUNCTION SUCKS RIGHT NOW DON'T USE IT PLEASEEEEEE**
+    /// # Panics
+    /// Panics if not called after a `start()` call or another `draw_object()` call
+    pub fn draw_object_pipeline<T: Vertex>(&mut self, pipeline: &Arc<GraphicsPipeline>, vertex_buffer: Subbuffer<[T]>, transform: &Transform) {
+        self.render_stage.update(RenderStage::Albedo);
+
+        let albedo_subbuffer = self.subbuffer_allocator.allocate_sized().unwrap();
+        *albedo_subbuffer.write().unwrap() = {
+            let (model_mat, normal_mat) = transform.get_matrices();
+            crate::shaders::albedo_vert::UModelData {
+                model: model_mat.into(),
+                normals: normal_mat.into(),
+            }
+        };
+
+        let (intensity, shininess) = (1.0, 64.0);
+
+        let specular_subbuffer = self.subbuffer_allocator.allocate_sized().unwrap();
+        *specular_subbuffer.write().unwrap() = albedo_frag::USpecularData {
+            intensity,
+            shininess,
+        };
+
+        let albedo_layout = pipeline
+            .layout()
+            .set_layouts()
+            .get(1)
+            .unwrap()
+            .clone();
+        let albedo_set = PersistentDescriptorSet::new(
+            &self.descriptor_set_allocator,
+            albedo_layout.clone(),
+            [
+                WriteDescriptorSet::buffer(0, albedo_subbuffer),
+                WriteDescriptorSet::buffer(1, specular_subbuffer),
+            ],
+        ).unwrap();
+
+        // Add albedo-related commands to the command buffer
+        self.base
+            .commands_mut()
+            .bind_pipeline_graphics(pipeline.clone())
+            .bind_descriptor_sets(
+                PipelineBindPoint::Graphics,
+                self.pipelines.albedo.layout().clone(),
+                0,
+                (self.vp_set.as_ref().unwrap().clone(), albedo_set.clone()),
+            )
+            // TODO: possible to bind multiple vertex buffers at once?
+            .bind_vertex_buffers(0, vertex_buffer);
     }
 
     /// Draws an ambient light, which adds global illumination to the entire scene
@@ -449,12 +503,6 @@ impl MeshRenderer {
             .unwrap();
     }
 
-    /// Builds the object by taking the vertices of `object` and creating a vertex buffer that
-    /// contains them
-    pub fn build_object(&self, object: MeshObjectBuilder) -> MeshObject {
-        object.build(&self.buffer_allocator, &self.base)
-    }
-
     fn get_render_stage(&self) -> &RenderStage {
         &self.render_stage
     }
@@ -467,6 +515,9 @@ impl MeshRenderer {
     }
     pub fn get_descriptor_set_allocator(&self) -> Arc<StandardDescriptorSetAllocator> {
         self.descriptor_set_allocator.clone()
+    }
+    pub fn get_render_pass(&self) -> Arc<RenderPass> {
+        self.render_pass.clone()
     }
 
     pub fn get_base_mut(&mut self) -> &mut RenderBase {

@@ -6,19 +6,15 @@ use vulkano::{buffer::BufferUsage, memory::allocator::MemoryAllocator};
 use crate::{transform::Transform};
 
 use crate::renderer::staging::{StagingBuffer, UniformSrc};
-use crate::renderer::RenderBase;
+use crate::renderer::{RenderBase, Renderer};
 
 /// Utilities for loading vertex and normal data from .obj files
 pub mod loader;
 pub use loader::{BasicVertex, UnlitVertex};
 
 use loader::ModelBuilder;
+use crate::renderer::mesh::MeshRenderer;
 use crate::shaders::albedo_vert;
-
-/// Contains data that can only be generated after being configured with the Rhyolite instance
-struct ObjectPostConfig {
-
-}
 
 pub struct MeshObjectBuilder {
     vertices: Vec<BasicVertex>,
@@ -56,14 +52,13 @@ impl MeshObjectBuilder {
         MeshObjectBuilder::from_vertices(object_transform, vertices, specular.0, specular.1)
     }
 
-    pub(crate) fn build(
-        self,
-        buffer_allocator: &(impl MemoryAllocator + ?Sized),
-        render_base: &RenderBase,
-    ) -> MeshObject {
+    pub fn build(self, renderer: &MeshRenderer) -> MeshObject {
+        let buffer_allocator = renderer.get_buffer_allocator();
+        let base = renderer.get_base();
+
         let num_vertices = self.vertices.len();
         let vertex_buffer = Buffer::from_iter(
-            buffer_allocator,
+            &buffer_allocator,
             BufferCreateInfo {
                 usage: BufferUsage::TRANSFER_SRC | BufferUsage::VERTEX_BUFFER,
                 ..Default::default()
@@ -76,7 +71,7 @@ impl MeshObjectBuilder {
                 .into_iter(),
         )
             .unwrap()
-            .into_device_local(num_vertices as u64, buffer_allocator, render_base);
+            .into_device_local(num_vertices as u64, &buffer_allocator, &base);
 
         MeshObject {
             transform: self.transform,

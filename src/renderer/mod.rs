@@ -35,7 +35,7 @@ use winit::dpi::LogicalSize;
 pub mod marched;
 #[cfg(feature = "mesh")]
 pub mod mesh;
-pub(crate) mod staging;
+pub mod staging;
 
 pub trait Renderer {
     fn recreate_all_size_dependent(&mut self);
@@ -208,15 +208,12 @@ impl RenderBase {
             Some(ClearValue::Depth(1f32)),
         ];
 
-        // Create a command buffer, which holds a list of commands that tell the graphics hardware what to do
-        let mut command_buffer_builder = AutoCommandBufferBuilder::primary(
-            &self.command_buffer_allocator,
-            self.graphics_queue.queue_family_index(),
-            CommandBufferUsage::OneTimeSubmit,
-        )
-            .unwrap();
+        self.image_idx = image_idx;
+        self.acquire_future = Some(acquire_future);
 
-        command_buffer_builder
+        let viewport = self.viewport.clone();
+
+        self.commands_mut()
             .begin_render_pass(
                 RenderPassBeginInfo {
                     clear_values,
@@ -224,14 +221,8 @@ impl RenderBase {
                 },
                 SubpassContents::Inline,
             )
-            .unwrap();
-
-        self.commands = Some(command_buffer_builder);
-        self.image_idx = image_idx;
-        self.acquire_future = Some(acquire_future);
-
-        let viewport = self.viewport.clone();
-        self.commands_mut().set_viewport(0, [viewport]);
+            .unwrap()
+            .set_viewport(0, [viewport]);
     }
 
     /// Finishes the rendering process and draws to the screen
@@ -296,17 +287,31 @@ impl RenderBase {
         self.images = new_images;
     }
 
+    /// Gets a mutable reference to the current command buffer, which holds a list of commands that
+    /// tell the graphics hardware what to do. If no such buffer yet exists, the function will
+    /// create a new one.
     pub fn commands_mut(
         &mut self,
     ) -> &mut AutoCommandBufferBuilder<
         PrimaryAutoCommandBuffer<StandardCommandBufferAlloc>,
         StandardCommandBufferAllocator,
     > {
-        // Should never panic because commands is initialized in start()
+        let cbb = match self.commands.take() {
+            None => {
+                 AutoCommandBufferBuilder::primary(
+                    &self.command_buffer_allocator,
+                    self.graphics_queue.queue_family_index(),
+                    CommandBufferUsage::OneTimeSubmit,
+                ).unwrap()
+            }
+            Some(current_cbb) => { current_cbb }
+        };
+        self.commands = Some(cbb);
         self.commands.as_mut().unwrap()
     }
 
     pub fn get_device(&self) -> Arc<Device> { self.device.clone() }
+    pub fn get_viewport(&self) -> &Viewport { &self.viewport }
 }
 
 // ========================================

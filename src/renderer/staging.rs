@@ -6,7 +6,7 @@ use vulkano::command_buffer::{
 use vulkano::memory::allocator::{AllocationCreateInfo, MemoryAllocator, MemoryUsage};
 use vulkano::sync::GpuFuture;
 
-pub(crate) trait StagingBuffer {
+pub trait StagingBuffer {
     fn into_device_local(
         self,
         buffer_len: u64,
