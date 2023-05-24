@@ -2,12 +2,12 @@ use nalgebra_glm::Vec3;
 use vulkano::buffer::{Buffer, BufferCreateInfo, Subbuffer};
 use vulkano::memory::allocator::{AllocationCreateInfo, MemoryUsage};
 use vulkano::pipeline::graphics::vertex_input::Vertex;
-use vulkano::{buffer::BufferUsage, memory::allocator::MemoryAllocator};
+use vulkano::buffer::BufferUsage;
 
 use crate::{transform::Transform};
 
 use crate::renderer::staging::{StagingBuffer, UniformSrc};
-use crate::renderer::{RenderBase, Renderer};
+use crate::renderer::Renderer;
 
 /// Utilities for loading vertex and normal data from .obj files
 pub mod loader;

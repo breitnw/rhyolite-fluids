@@ -89,7 +89,7 @@ impl<T: BufferContents + ?Sized> StagingBuffer for Subbuffer<T> {
     }
 }
 
-pub(crate) trait UniformSrc<T: BufferContents> {
+pub trait UniformSrc<T: BufferContents> {
     fn get_raw(&self) -> T;
 }
 

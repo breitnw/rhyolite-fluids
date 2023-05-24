@@ -88,6 +88,8 @@ impl<T: Renderer + 'static> Rhyolite<T> {
             .take()
             .unwrap()
             .run(move |event, target, control_flow| {
+                let mut clear_inputs = false;
+
                 match &event {
                     Event::WindowEvent { event, .. } => match event {
                         WindowEvent::CloseRequested => {
@@ -97,14 +99,17 @@ impl<T: Renderer + 'static> Rhyolite<T> {
                             self.renderer.recreate_all_size_dependent();
                         }
                         WindowEvent::KeyboardInput { input, .. } => {
-                            keyboard.update_with_input(input);
+                            keyboard.add_input(input);
                         }
                         WindowEvent::Occluded(val) => {
                             occluded = *val;
                         }
                         _ => (),
                     },
-                    Event::RedrawEventsCleared => time_state.update(),
+                    Event::RedrawEventsCleared => {
+                        time_state.update();
+                        clear_inputs = true;
+                    },
                     _ => (),
                 }
 
@@ -121,6 +126,8 @@ impl<T: Renderer + 'static> Rhyolite<T> {
                     &time_state,
                     &mut self.renderer,
                 );
+
+                if clear_inputs { keyboard.clear_inputs(); }
             });
     }
 }

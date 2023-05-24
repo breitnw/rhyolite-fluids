@@ -373,7 +373,7 @@ struct MarchedLightingData {
 ///
 /// # Panics
 /// - Panics if the number of elements in `values` exceeds `MAX_LEN`
-unsafe fn to_partially_init_arr<const MAX_LEN: usize, T>(values: impl IntoIterator<Item = T>) -> [T; MAX_LEN] {
+pub unsafe fn to_partially_init_arr<const MAX_LEN: usize, T>(values: impl IntoIterator<Item = T>) -> [T; MAX_LEN] {
     let mut uninit_array: MaybeUninit<[T; MAX_LEN]> = MaybeUninit::uninit();
     let mut ptr_i = uninit_array.as_mut_ptr() as *mut T;
 

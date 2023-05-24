@@ -514,6 +514,9 @@ impl MeshRenderer {
     pub fn get_render_pass(&self) -> Arc<RenderPass> {
         self.render_pass.clone()
     }
+    pub fn get_subbuffer_allocator(&self) -> &SubbufferAllocator {
+        &self.subbuffer_allocator
+    }
 
     pub fn get_base_mut(&mut self) -> &mut RenderBase {
         &mut self.base

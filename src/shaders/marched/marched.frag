@@ -51,8 +51,6 @@ float distance_from_sphere(in vec3 p, in vec3 c, float r) {
 }
 
 float map_the_world(in vec3 p) {
-    float fx = 0.0;
-    float fy = 0.0;
     float result = 32767.0;
     for (int i = 0; i < metaballs.len; i++) {
         UMetaball metaball = metaballs.data[i];
