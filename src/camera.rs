@@ -44,6 +44,7 @@ impl Camera {
         }
     }
 
+    // TODO: find a way to do this automatically
     /// Configures the camera's aspect ratio. Needs to be run before the camera can be used.
     pub fn configure(&mut self, dimensions: [i32; 2]) {
         let aspect_ratio = dimensions[0] as f32 / dimensions[1] as f32;
@@ -118,10 +119,8 @@ impl Camera {
     }
 }
 
-impl UniformSrc for Camera {
-    type UniformType = albedo_vert::UCamData;
-
-    fn get_raw(&self) -> Self::UniformType {
+impl UniformSrc<albedo_vert::UCamData> for Camera {
+    fn get_raw(&self) -> albedo_vert::UCamData {
         albedo_vert::UCamData {
             view: self.get_view().into(),
             projection: self.get_post_config().expect( // TODO: EWWW EXPECT (should be unconfigurederror somehow)

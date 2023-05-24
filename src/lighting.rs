@@ -30,10 +30,8 @@ impl AmbientLight {
     }
 }
 
-impl UniformSrc for AmbientLight {
-    type UniformType = ambient_frag::UAmbientLightData;
-
-    fn get_raw(&self) -> Self::UniformType {
+impl UniformSrc<ambient_frag::UAmbientLightData> for AmbientLight {
+    fn get_raw(&self) -> ambient_frag::UAmbientLightData {
         ambient_frag::UAmbientLightData {
             color: expand_vec3(&self.color),
             intensity: self.intensity.into(),
@@ -41,9 +39,9 @@ impl UniformSrc for AmbientLight {
     }
 }
 
-impl IntoPersistentUniform for AmbientLight {
-    fn get_current_buffer(&self) -> Option<Subbuffer<Self::UniformType>> { self.subbuffer.clone() }
-    fn set_current_buffer(&mut self, buf: Subbuffer<Self::UniformType>) { self.subbuffer = Some(buf) }
+impl IntoPersistentUniform<ambient_frag::UAmbientLightData> for AmbientLight {
+    fn get_current_buffer(&self) -> Option<Subbuffer<ambient_frag::UAmbientLightData>> { self.subbuffer.clone() }
+    fn set_current_buffer(&mut self, buf: Subbuffer<ambient_frag::UAmbientLightData>) { self.subbuffer = Some(buf) }
 }
 
 
@@ -66,10 +64,8 @@ impl PointLight {
     }
 }
 
-impl UniformSrc for PointLight {
-    type UniformType = point_frag::UPointLightData;
-
-    fn get_raw(&self) -> Self::UniformType {
+impl UniformSrc<point_frag::UPointLightData> for PointLight {
+    fn get_raw(&self) -> point_frag::UPointLightData {
         point_frag::UPointLightData {
             position: expand_vec3(&self.position),
             color: expand_vec3(&self.color),
@@ -79,9 +75,9 @@ impl UniformSrc for PointLight {
 }
 
 #[cfg(feature = "mesh")]
-impl IntoPersistentUniform for PointLight {
-    fn get_current_buffer(&self) -> Option<Subbuffer<Self::UniformType>> { self.subbuffer.clone() }
-    fn set_current_buffer(&mut self, buf: Subbuffer<Self::UniformType>) { self.subbuffer = Some(buf) }
+impl IntoPersistentUniform<point_frag::UPointLightData> for PointLight {
+    fn get_current_buffer(&self) -> Option<Subbuffer<point_frag::UPointLightData>> { self.subbuffer.clone() }
+    fn set_current_buffer(&mut self, buf: Subbuffer<point_frag::UPointLightData>) { self.subbuffer = Some(buf) }
 }
 
 #[cfg(feature = "marched")]

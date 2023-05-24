@@ -64,8 +64,8 @@ impl Transform {
         self.rotation
     }
 
-    /// Updates the model and normal transformation matrices if there has been a change since the
-    /// last time this function was called, and then returns these updated matrices.
+    /// Caches the model and normal transformation matrices if there has been a change since the
+    /// last time this function was called, and then returns these cached matrices.
     pub fn get_matrices(&self) -> (TMat4<f32>, TMat4<f32>) {
         if let Some(cache) = self.cache.get() {
             return cache;

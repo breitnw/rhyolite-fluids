@@ -89,21 +89,20 @@ impl<T: BufferContents + ?Sized> StagingBuffer for Subbuffer<T> {
     }
 }
 
-pub(crate) trait UniformSrc {
-    type UniformType: BufferContents;
-    fn get_raw(&self) -> Self::UniformType;
+pub(crate) trait UniformSrc<T: BufferContents> {
+    fn get_raw(&self) -> T;
 }
 
-pub(crate) trait IntoPersistentUniform: UniformSrc {
-    fn get_current_buffer(&self) -> Option<Subbuffer<Self::UniformType>>;
-    fn set_current_buffer(&mut self, buf: Subbuffer<Self::UniformType>);
+pub(crate) trait IntoPersistentUniform<T: BufferContents>: UniformSrc<T> {
+    fn get_current_buffer(&self) -> Option<Subbuffer<T>>;
+    fn set_current_buffer(&mut self, buf: Subbuffer<T>);
 
     fn create_buffer(
         &mut self,
         buffer_allocator: &(impl MemoryAllocator + ?Sized),
         render_base: &RenderBase
-    ) -> Subbuffer<Self::UniformType> {
-        let buf: Subbuffer<Self::UniformType> = Buffer::from_data(
+    ) -> Subbuffer<T> {
+        let buf: Subbuffer<T> = Buffer::from_data(
             buffer_allocator,
             BufferCreateInfo {
                 usage: BufferUsage::TRANSFER_SRC | BufferUsage::UNIFORM_BUFFER,
@@ -125,7 +124,7 @@ pub(crate) trait IntoPersistentUniform: UniformSrc {
         &mut self,
         buffer_allocator: &(impl MemoryAllocator + ?Sized),
         render_base: &RenderBase
-    ) -> Subbuffer<Self::UniformType>{
+    ) -> Subbuffer<T>{
         return if let Some(buffer) = self.get_current_buffer().as_ref() {
             buffer.clone()
         } else {

@@ -1,7 +1,6 @@
 use nalgebra_glm::Vec3;
 use crate::renderer::staging::UniformSrc;
-use crate::shaders::{expand_vec3};
-use crate::shaders::marched_frag::UMetaball;
+use crate::shaders::{expand_vec3, marched_frag};
 
 /// A metaball, or a sphere that blends with other spheres. The default object in marched rendering.
 pub struct Metaball {
@@ -32,11 +31,9 @@ impl Metaball {
     }
 }
 
-impl UniformSrc for Metaball {
-    type UniformType = UMetaball;
-
-    fn get_raw(&self) -> Self::UniformType {
-        UMetaball {
+impl UniformSrc<marched_frag::UMetaball> for Metaball {
+    fn get_raw(&self) -> marched_frag::UMetaball {
+        marched_frag::UMetaball {
             position: expand_vec3(self.get_position()),
             color: expand_vec3(self.get_color()),
             radius: self.get_radius(),
