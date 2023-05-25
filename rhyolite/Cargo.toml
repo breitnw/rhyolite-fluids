@@ -1,0 +1,19 @@
+[package]
+name = "rhyolite"
+version = "0.0.1"
+authors = ["breitnw"]
+edition = "2021"
+description = "A lightweight rendering engine built on Vulkan"
+license = "MIT"
+
+[dependencies]
+vulkano = "0.33.0"
+vulkano-win = "0.33.0"
+vulkano-shaders = "0.33.0"
+nalgebra-glm = "0.18.0"
+winit = "0.28"
+
+[features]
+mesh = []
+marched = []
+#vulkano = []

@@ -1,0 +1,172 @@
+#version 450
+
+// smaller number means more subdivisions per unit (higher resolution)
+#define RESOLUTION 0.10
+#define MAX_METABALLS 1024
+#define BLEND_FACTOR 2.0
+
+// layout(local_size_x = 10, local_size_y = 10, local_size_z = 10) in;
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
+
+// A buffer containing data for the vertices, alternating between position and normal data. Thus, to index into the
+// buffer with any index `i`, you should go to index `[i * 2]` for position data and `[i * 2 + 1]` for normal data.
+layout(set = 0, binding = 0) writeonly buffer SVertices {
+    vec4 data[];
+} vertices;
+
+// We use this buffer to describe to the vertex shader how many vertices to draw
+layout(set = 0, binding = 1) writeonly buffer SIndirectDrawArgs {
+    uint vertex_count;
+    uint unused0;
+    uint unused1;
+    uint unused2;
+};
+
+// Marching cubes method - we want to render a surface defined by a 3D function f outputting a scalar. If f(x,y,z) < 0,
+// point is outside the surface, f(x,y,z) > 0 means point is inside. f(x,y,z) defines points on the surface we want to
+// render. space is divided into cells, each cell has 8 corners, in each corner, the function can either be positive or
+// negative. That means there are 2^8 = 256 possibilities in which corners can be positive/negative (configuration can
+// be expressed by 8 bits).
+// if I take all eight corners, and for each one, I determine whether f in it is positive or negative. This gives me
+// 8 bits, joining them together gives me the configuration number for each configuration, there are given triangles
+// that define the surface. triangle_counts represents how many triangles have to be rendered for given configuration,
+// these go from 0 to 5.
+layout(set = 1, binding = 0) uniform UTriangleCounts {
+    uint triangle_counts[256];
+};
+
+// Describes the edges on which the vertices lie for each triangle of a given configuration. Up to 5 triangles are
+// described for each, and triangles that are not generated for a configuration are listed as `255 255 255` (see
+// `vertex_edge_indices.txt`).
+layout(set = 1, binding = 1) uniform UTriangleVertices {
+    uint vertex_edge_indices[3 * 5 * 256];
+};
+
+struct UMetaball {
+    vec4 position;
+    vec4 color;
+    float radius;
+};
+
+layout(set = 2, binding = 0) uniform UMetaballData {
+    UMetaball data[MAX_METABALLS];
+    uint len;
+} metaballs;
+
+
+// The dimensions of the grid, which we'll use to center the grid on the origin
+uvec3 grid_size = gl_WorkGroupSize * gl_NumWorkGroups;
+
+
+struct UVertex {
+    vec4 position;
+    vec4 normal;
+    vec4 color;
+};
+void add_vertex(uint vertex_offset, UVertex vertex) {
+    vertices.data[vertex_offset * 3] = vertex.position;
+    vertices.data[vertex_offset * 3 + 1] = vertex.normal;
+    vertices.data[vertex_offset * 3 + 2] = vertex.color;
+}
+void add_triangle(uint first_vertex_offset, UVertex[3] vertices) {
+    for (int i = 0; i < 3; i++) {
+        add_vertex(first_vertex_offset + i, vertices[i]);
+    }
+}
+
+float smin(float a, float b, float k) {
+    float h = clamp(0.5 + 0.5*(a-b)/k, 0.0, 1.0);
+    return mix(a, b, h) - k*h*(1.0-h);
+}
+
+float distance_from_sphere(in vec3 p, in vec3 c, float r) {
+    return length(p-c) - r;
+}
+
+// TODO: USE A SEPARATE COMPUTE SHADER TO GENERATE AN IMAGE3D FOR THIS!!!! right now it has to check the same position for 8 nodes
+float get_density(vec3 position) {
+    // float distance_field = 0.0;
+    // for (int i = 0; i < metaballs.len; i++) {
+    //     float dist = distance(vec3(metaballs.data[i].position), gl_GlobalInvocationID) - metaballs.data[i].radius;
+    //     // distance_field += S / (0.0001 + pow(dist, 2)) - 0.05;
+    //     distance_field -= dist;
+    // }
+    // // return -sqrt(1.0 / distance_field);
+    // return distance_field;
+
+    float result = 32767.0;
+    for (int i = 0; i < metaballs.len; i++) {
+        UMetaball metaball = metaballs.data[i];
+        result = smin(result, distance_from_sphere(position, metaball.position.xyz, metaball.radius), BLEND_FACTOR);
+    }
+    return -result;
+
+    // return metaballs.data[0].radius - distance(vec3(index) * RESOLUTION, vec3(metaballs.data[0].position));
+}
+
+// The offsets of each of the corners in the order of the bits they correspond to.
+const ivec3 corner_offsets[8] = ivec3[8](
+    ivec3(0, 0, 0), ivec3(1, 0, 0), ivec3(1, 1, 0), ivec3(0, 1, 0),
+    ivec3(0, 0, 1), ivec3(1, 0, 1), ivec3(1, 1, 1), ivec3(0, 1, 1)
+);
+
+// The corner indices that each edge is formed by.
+const uvec2 edges[12] = uvec2[12](
+    uvec2(0, 1), uvec2(1, 2), uvec2(2, 3), uvec2(3, 0),
+    uvec2(4, 5), uvec2(5, 6), uvec2(6, 7), uvec2(7, 4),
+    uvec2(0, 4), uvec2(1, 5), uvec2(2, 6), uvec2(3, 7)
+);
+
+// Gets the vertices for a triangle based on the densities that surround it,
+UVertex[3] get_triangle(float[8] densities, uint configuration, uint triangle_i) {
+    uint absolute_offset = configuration * 15 + triangle_i * 3;
+
+    UVertex triangle_vertices[3];
+    for (int i = 0; i < 3; i++) {
+        uint edge_i = vertex_edge_indices[absolute_offset + i];
+        uvec2 edge = edges[edge_i];
+        float a = densities[edge[0]] / (densities[edge[0]] - densities[edge[1]]);
+        vec3 pos = (vec3(gl_GlobalInvocationID) + mix(corner_offsets[edge.r], corner_offsets[edge.g], a) - grid_size / 2) * RESOLUTION;
+        triangle_vertices[i].position = vec4(pos, 1.0);// + vec4(0.0, float(triangle_i) * 0.2, 0.0, 0.0);
+    }
+    vec4 normal = vec4(normalize(cross(
+        triangle_vertices[2].position.xyz - triangle_vertices[0].position.xyz,
+        triangle_vertices[1].position.xyz - triangle_vertices[0].position.xyz
+    )), 1.0);
+    for (int i = 0; i < 3; i++) {
+        vec4 tri_color = vec4(1.0, 0.0, 0.0, 0.0);
+
+//         Colorful mode (for debugging marching cubes configurations)
+//        switch(triangle_i) {
+//            case 0: tri_color = vec4(1.0, 0.0, 0.0, 0.0); break;
+//            case 1: tri_color = vec4(1.0, 1.0, 0.0, 0.0); break;
+//            case 2: tri_color = vec4(0.0, 1.0, 0.0, 0.0); break;
+//            case 3: tri_color = vec4(0.0, 0.0, 1.0, 0.0); break;
+//            case 4: tri_color = vec4(1.0, 0.0, 1.0, 0.0); break;
+//        }
+
+        triangle_vertices[i].normal = normal;
+        triangle_vertices[i].color = tri_color;
+    }
+    return triangle_vertices;
+}
+
+void main() {
+    int configuration = 0;
+    float densities[8];
+
+    for (int i = 0; i < 8; i++) {
+        vec3 node_pos = (vec3(gl_GlobalInvocationID) + corner_offsets[i] - grid_size / 2) * RESOLUTION;
+        densities[i] = get_density(node_pos);
+        configuration |= int(densities[i] > 0.0) << i;
+    }
+
+    uint triangle_count = triangle_counts[configuration];
+
+    // the offset of the first vertex in the vertex buffer
+    uint vertex_offset = atomicAdd(vertex_count, triangle_count * 3);
+
+    for (int triangle_i = 0; triangle_i < triangle_count; triangle_i++) {
+        add_triangle(vertex_offset + triangle_i * 3, get_triangle(densities, configuration, triangle_i));
+    }
+}
