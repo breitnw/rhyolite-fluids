@@ -1,7 +1,7 @@
-# rhyolite
-An in-progress, bare-bones rendering engine built with Vulkano.
+# rhyolite-fluids
+An in-progress, bare-bones rendering engine built with Vulkano, tailored for my research project, _Improving sphere blending performance for fluid simulation applications using ray-marched rendering._ Includes separate ray-marched and mesh rendering engines, utilizing marching-cubes and a smooth-min distance field, respectively, for sphere blending
 
-Rhyolite is built first and foremost as a personal project and a renderer for my fluid simulation research, but it can be used for all sorts of 
+Rhyolite is built first and foremost as a personal project and a renderer for my research, but it can be used for all sorts of 
 applications! Currently, it's able to load and render .obj files, both unlit and lit. Unlit models are rendered entirely with a chosen albedo color,
 while lit models are shaded with Phong shading. To light models, Rhyolite offers point and directional lights, each with controllable color and 
 brightness parameters.
